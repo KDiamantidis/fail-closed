@@ -4,14 +4,16 @@ import pytest
 
 from cli import auth_outcomes, field_change, main
 
-SCENARIO = Path(__file__).resolve().parents[2] / "scenarios" / "7702_attack"
+SCENARIOS = Path(__file__).resolve().parents[2] / "scenarios"
 
 
-def test_field_change_one_sided_means_zero():
-    # diffMode: empty code / zero nonce are missing from "pre"
+def test_field_change_follows_diffmode():
+    # pre is the full prior account; post lists only changed fields
     assert field_change({}, {"code": "0xef0100ab"}, "code") == ("0x", "0xef0100ab")
-    assert field_change({"balance": "0x10"}, {}, "balance") == ("0x10", "0x0")
-    assert field_change({}, {}, "nonce") is None
+    assert field_change({"balance": "0x10", "nonce": 6}, {"nonce": 8}, "nonce") == (6, 8)
+    # balance listed in pre but not in post = UNCHANGED, not zero
+    assert field_change({"balance": "0x10"}, {"nonce": 8}, "balance") is None
+    assert field_change({"balance": "0x10"}, {"balance": "0x0"}, "balance") == ("0x10", "0x0")
 
 
 def test_auth_outcomes_only_matching_nonce_applies():
@@ -48,11 +50,18 @@ def test_reset_commands(tmp_path, capsys):
 
 
 @pytest.mark.docker
-def test_7702_scenario_end_to_end(capsys):
-    assert main(["scenario", str(SCENARIO)]) == 0
+def test_binance_scenario_report(tmp_path, capsys):
+    assert main(["scenario", str(SCENARIOS / "d_binance_7702.json"), "--db", str(tmp_path / "d.sqlite3")]) == 0
     out = capsys.readouterr().out
+    assert "path    : SLOW" in out
     assert "code    : 0x -> 0xef010000000000000000000000000000000000005eeeee" in out
-    assert "nonce   : 7 -> 8" in out
-    assert "100.000000 ETH -> 0.000000 ETH" in out
-    assert "MOCK - no model was called" in out
-    assert "NetworkMode    : none" in out
+    assert "calls sweep()" in out and "MOVED 100.000000 ETH" in out
+    assert "VERDICT : BLOCK" in out and "level 2: paused wallet" in out
+
+
+@pytest.mark.docker
+def test_run_all_meets_every_expectation(tmp_path, capsys):
+    assert main(["run-all", "--db", str(tmp_path / "all.sqlite3")]) == 0
+    out = capsys.readouterr().out
+    assert "all expectations met" in out
+    assert "frozen destinations (level 1): 1" in out and "paused wallets (level 2): 1" in out

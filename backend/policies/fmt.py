@@ -10,7 +10,7 @@ def over_pct(part: int, whole: int, limit_pct: float) -> bool:
 
 
 def short(addr: str) -> str:
-    return f"{addr[:6]}…{addr[-4:]}" if addr and len(addr) == 42 else str(addr)
+    return f"{addr[:6]}..{addr[-4:]}" if addr and len(addr) == 42 else str(addr)
 
 
 def amount(asset: str, value: int) -> str:

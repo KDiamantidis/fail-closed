@@ -1,10 +1,7 @@
-# Run a scenario end to end on Windows (Docker Desktop).
-#   .\scenarios\run.ps1                 # 7702_attack
-#   .\scenarios\run.ps1 7702_attack -Json
-param(
-    [string]$Scenario = "7702_attack",
-    [switch]$Json
-)
+# Run the scenarios on Windows (Docker Desktop).
+#   .\scenarios\run.ps1                    # run-all: every scenario, one table + breaker state
+#   .\scenarios\run.ps1 d_binance_7702     # one scenario with the full report
+param([string]$Scenario = "")
 $root = Split-Path $PSScriptRoot -Parent
 $venv = Join-Path $root "backend\.venv"
 $py = Join-Path $venv "Scripts\python.exe"
@@ -21,7 +18,11 @@ if (-not (Test-Path $py)) {
     if ($LASTEXITCODE -ne 0) { exit 1 }
 }
 
-$cliArgs = @((Join-Path $root "backend\cli.py"), "scenario", (Join-Path $PSScriptRoot $Scenario))
-if ($Json) { $cliArgs += "--json" }
-& $py @cliArgs
+$cli = Join-Path $root "backend\cli.py"
+if ($Scenario -eq "") {
+    & $py $cli run-all
+} else {
+    $file = Join-Path $PSScriptRoot ($Scenario -replace '\.json$', '')
+    & $py $cli scenario "$file.json"
+}
 exit $LASTEXITCODE

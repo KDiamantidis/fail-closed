@@ -55,10 +55,10 @@ Every request names its `wallet_type` and `chain_id`.
 
 | Wallet type | Sends to | Rules |
 |---|---|---|
-| `customer_hot` | Customers' own addresses, unknown in advance. No allowlist. | Behavior rules: R3, R6, R7, R8 |
+| `customer_hot` | Customers' own addresses, unknown in advance. No allowlist. | Behavior rules: R6, R7, R8, C1 |
 | `treasury` | A few known addresses | Strict allowlist: R4, R5 |
 
-R0, R1 and R2 apply to every wallet.
+R0, R1, R2, R3 and the breaker checks F1 (destination frozen) / F2 (wallet paused) apply to every wallet.
 
 ### Verdicts
 
@@ -74,7 +74,7 @@ R0, R1 and R2 apply to every wallet.
 | R0 | Sandbox, trace, diff or receipt failed or empty; or a rule crashed or missed an input | all | BLOCK |
 | R1 | An account gets delegation code (`0xef0100…`) to a contract not on the allowlist | all | BLOCK |
 | R2 | More than one authorization in a request, or authorizations for consecutive nonces | all | BLOCK |
-| R3 | A wallet loses more than X% of its balance to one non-allowlisted address | customer_hot | BLOCK |
+| R3 | A wallet loses more than X% of its balance to one non-allowlisted address (checked before the sandbox from the Guard's balances, and after it from the diff, token Transfer logs and the delegation probe) | all | BLOCK |
 | R4 | Amount above limit | treasury | NEEDS_HUMAN |
 | R5 | Destination not on the allowlist | treasury | NEEDS_HUMAN (BLOCK if also above limit) |
 | R6 | Wallet outflow in a time window above limit | customer_hot | BLOCK |
@@ -151,13 +151,23 @@ Needs Docker (Docker Desktop on Windows) and Python 3.12+.
 # 1. Build the sandbox image (Foundry v1.8.5, contracts compiled at build time)
 sandbox/build.sh                # Windows: .\sandbox\build.ps1
 
-# 2. Run the Binance-style scenario end to end
-scenarios/run.sh 7702_attack    # Windows: .\scenarios\run.ps1 7702_attack
+# 2. Run every scenario (a-e) through the Guard: one table + circuit breaker state
+scenarios/run.sh                # Windows: .\scenarios\run.ps1
+
+# 3. One scenario with the full report (diff, probe evidence, findings, timings, limits)
+scenarios/run.sh d_binance_7702 # Windows: .\scenarios\run.ps1 d_binance_7702
+
+# Human reset of a latched freeze / pause (logged with who did it)
+backend/.venv/bin/python backend/cli.py reset --address 0x... --actor alice --db data/run.sqlite3
 ```
 
-The scenario prints the state diff (including the `0xef0100…` delegation code), the
-balance changes, the authorizationList, the AI result, the time of each step and the
-container limits as Docker applied them.
+| Scenario | Expected |
+|---|---|
+| (a) customer hot wallet, small withdrawal | ALLOW, fast path |
+| (b) treasury, allowlisted, above limit | NEEDS_HUMAN (R4) |
+| (c) treasury, unknown address, above limit | BLOCK (R5) |
+| (d) Binance-style: 5 EIP-7702 authorizations to a sweeper | BLOCK on the slow path (R1, R2, R3 from the probe), wallet paused |
+| (e) Mercado-style: one address, 5 chains, token by token | ALLOW, then DELAY (R7), then BLOCK (R7, R8) and the address is frozen; other customers still ALLOW |
 
 AI: copy `.env.example` to `.env` and set `VULTR_INFERENCE_API_KEY`. Without a key the
 AI is a local mock and every result is marked **[MOCK]**. With a key, a failure never
