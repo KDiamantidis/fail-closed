@@ -63,7 +63,7 @@ def r2_authorizations(ctx: RuleContext) -> list[Finding]:
     since = ctx.now - ctx.settings.r2_window_hours * HOUR
     for a in auths:
         who = authority_of(a, ctx.tx)
-        for chain, prev in ctx.history.recent_auth_nonces(who, since):
+        for chain, prev in ctx.history.recent_auth_nonces(who, since, exclude=ctx.exclude_check):
             same_chain = a.chain_id == 0 or chain == 0 or chain == a.chain_id
             if same_chain and abs(a.nonce - prev) == 1:
                 findings.append(Finding(
@@ -144,7 +144,7 @@ def r6_outflow_window(ctx: RuleContext) -> list[Finding]:
     ctx.need("history", "settings")
     s = ctx.settings
     since = ctx.now - s.r6_window_minutes * MINUTE
-    prior = ctx.history.outflow(ctx.tx.from_, "native", since)
+    prior = ctx.history.outflow(ctx.tx.from_, "native", since, exclude=ctx.exclude_check)
     total = prior + ctx.tx.value
     if total > s.r6_outflow_limit_wei:
         return [Finding(
@@ -162,7 +162,8 @@ def r7_multi_chain_destination(ctx: RuleContext) -> list[Finding]:
     d, s = ctx.decoded, ctx.settings
     if d.amount == 0:
         return []
-    chains = ctx.history.chains_to(d.destination, ctx.now - s.r7_window_hours * HOUR) | {ctx.tx.chain_id}
+    chains = ctx.history.chains_to(d.destination, ctx.now - s.r7_window_hours * HOUR,
+                                   exclude=ctx.exclude_check) | {ctx.tx.chain_id}
     n, listed = len(chains), ", ".join(str(c) for c in sorted(chains))
     if n >= s.r7_freeze_chains:
         return [Finding(
@@ -186,7 +187,8 @@ def r8_many_assets(ctx: RuleContext) -> list[Finding]:
     d, s = ctx.decoded, ctx.settings
     if d.amount == 0:
         return []
-    assets = ctx.history.assets_to(d.destination, ctx.now - s.r8_window_minutes * MINUTE)
+    assets = ctx.history.assets_to(d.destination, ctx.now - s.r8_window_minutes * MINUTE,
+                                   exclude=ctx.exclude_check)
     assets |= {f"{ctx.tx.chain_id}:{d.asset}"}
     if len(assets) >= s.r8_freeze_assets:
         return [Finding(

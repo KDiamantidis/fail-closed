@@ -64,6 +64,22 @@ CREATE TABLE IF NOT EXISTS paused_wallets (
     check_id TEXT
 );
 
+CREATE TABLE IF NOT EXISTS held (
+    id          TEXT PRIMARY KEY,   -- the check id
+    kind        TEXT NOT NULL,      -- needs_human | delay
+    ts          REAL NOT NULL,
+    request     TEXT NOT NULL,
+    rule_ids    TEXT NOT NULL,      -- rules that caused the hold (a re-check may repeat these)
+    reasons     TEXT NOT NULL,
+    status      TEXT NOT NULL,      -- pending | approved | rejected | released | blocked
+    release_at  REAL,
+    decided_by  TEXT,
+    decided_at  REAL,
+    outcome     TEXT,
+    approval_id TEXT,
+    signed      INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS breaker_events (
     ts      REAL NOT NULL,
     action  TEXT NOT NULL,
@@ -173,30 +189,32 @@ class History:
         with self.lock:
             return self.conn.execute(sql, args).fetchall()
 
-    def outflow(self, wallet: str, asset: str, since: float) -> int:
+    def outflow(self, wallet: str, asset: str, since: float, exclude: str | None = None) -> int:
         marks = ",".join("?" * len(MAY_MOVE_FUNDS))
         rows = self._rows(
-            f"SELECT amount FROM checks WHERE wallet = ? AND asset = ? AND ts >= ? AND verdict IN ({marks})",
-            (wallet, asset, since, *MAY_MOVE_FUNDS))
+            f"SELECT amount FROM checks WHERE wallet = ? AND asset = ? AND ts >= ? AND verdict IN ({marks})"
+            " AND id != ?", (wallet, asset, since, *MAY_MOVE_FUNDS, exclude or ""))
         return sum(int(r["amount"]) for r in rows)
 
-    def chains_to(self, destination: str, since: float) -> set[int]:
+    def chains_to(self, destination: str, since: float, exclude: str | None = None) -> set[int]:
         """Chains from which value was sent (or attempted) to `destination`."""
         rows = self._rows(
-            "SELECT DISTINCT chain_id FROM checks WHERE destination = ? AND ts >= ? AND amount != '0'",
-            (destination, since))
+            "SELECT DISTINCT chain_id FROM checks WHERE destination = ? AND ts >= ? AND amount != '0'"
+            " AND id != ?", (destination, since, exclude or ""))
         return {r["chain_id"] for r in rows}
 
-    def assets_to(self, destination: str, since: float) -> set[str]:
+    def assets_to(self, destination: str, since: float, exclude: str | None = None) -> set[str]:
         """Distinct assets as 'chain_id:asset' (the same token address on two chains is two assets)."""
         rows = self._rows(
-            "SELECT DISTINCT chain_id, asset FROM checks WHERE destination = ? AND ts >= ? AND amount != '0'",
-            (destination, since))
+            "SELECT DISTINCT chain_id, asset FROM checks WHERE destination = ? AND ts >= ? AND amount != '0'"
+            " AND id != ?", (destination, since, exclude or ""))
         return {f"{r['chain_id']}:{r['asset']}" for r in rows}
 
-    def recent_auth_nonces(self, authority: str, since: float) -> list[tuple[int, int]]:
-        rows = self._rows("SELECT chain_id, nonce FROM auth_nonces WHERE authority = ? AND ts >= ?",
-                          (authority, since))
+    def recent_auth_nonces(self, authority: str, since: float,
+                           exclude: str | None = None) -> list[tuple[int, int]]:
+        rows = self._rows(
+            "SELECT chain_id, nonce FROM auth_nonces WHERE authority = ? AND ts >= ? AND check_id != ?",
+            (authority, since, exclude or ""))
         return [(r["chain_id"], r["nonce"]) for r in rows]
 
     def checks_to(self, destination: str) -> list[dict[str, Any]]:
@@ -221,6 +239,47 @@ class History:
 
     def events(self) -> list[dict[str, Any]]:
         return [dict(r) for r in self._rows("SELECT * FROM breaker_events ORDER BY ts, rowid", ())]
+
+    # ---- held requests (NEEDS_HUMAN waits for a human, DELAY waits for release_at) ----
+
+    def hold(self, check_id: str, kind: str, ts: float, request: dict, rule_ids: list[str],
+             reasons: list[str], release_at: float | None = None) -> None:
+        with self.lock, self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO held (id, kind, ts, request, rule_ids, reasons, status, release_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)",
+                (check_id, kind, ts, json.dumps(request), json.dumps(rule_ids), json.dumps(reasons), release_at))
+
+    def _held_row(self, r: sqlite3.Row) -> dict[str, Any]:
+        d = dict(r)
+        for k in ("request", "rule_ids", "reasons"):
+            d[k] = json.loads(d[k])
+        d["signed"] = None if d["signed"] is None else bool(d["signed"])
+        return d
+
+    def held(self, status: str | None = "pending", kind: str | None = None) -> list[dict[str, Any]]:
+        rows = self._rows("SELECT * FROM held WHERE (? IS NULL OR status = ?) AND (? IS NULL OR kind = ?) "
+                          "ORDER BY ts, rowid", (status, status, kind, kind))
+        return [self._held_row(r) for r in rows]
+
+    def get_held(self, check_id: str) -> dict[str, Any] | None:
+        rows = self._rows("SELECT * FROM held WHERE id = ?", (check_id,))
+        return self._held_row(rows[0]) if rows else None
+
+    def due_delays(self, now: float) -> list[dict[str, Any]]:
+        rows = self._rows("SELECT * FROM held WHERE kind = 'delay' AND status = 'pending' AND release_at <= ? "
+                          "ORDER BY release_at, rowid", (now,))
+        return [self._held_row(r) for r in rows]
+
+    def resolve_held(self, check_id: str, status: str, outcome: str, decided_by: str, now: float,
+                     approval_id: str | None = None, signed: bool | None = None) -> bool:
+        """pending -> a final status, exactly once (False if it was already decided)."""
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                "UPDATE held SET status = ?, outcome = ?, decided_by = ?, decided_at = ?, approval_id = ?, "
+                "signed = ? WHERE id = ? AND status = 'pending'",
+                (status, outcome, decided_by, now, approval_id, None if signed is None else int(signed), check_id))
+            return cur.rowcount == 1
 
     def recent(self, limit: int = 50) -> list[dict[str, Any]]:
         """Newest first."""

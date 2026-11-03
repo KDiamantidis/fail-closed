@@ -44,6 +44,7 @@ class RuleContext:
     history: Any = None  # history.History (read-only use in rules)
     state: Any = None  # state_provider.StartingState (Guard side)
     now: float = 0.0
+    exclude_check: str | None = None  # re-check of a held request: do not count itself in history
     extra: dict[str, Any] = field(default_factory=dict)
 
     def need(self, *names: str) -> None:

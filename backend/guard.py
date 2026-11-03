@@ -172,6 +172,19 @@ class Guard:
                                          "llm": llm.model_dump() if llm else None})
         result.verdict, result.simulation, result.llm = verdict, sim, llm
 
+    def recheck(self, tx: TxRequest, exclude: str, now: float | None = None) -> list:
+        """Run the request/history rules again for a held request (not counting itself).
+        Used before a human approval or a DELAY release: a freeze or pause may be new."""
+        now = self.clock() if now is None else now
+        decoded = decode(tx, self.settings.known_tokens)
+        try:
+            state = self.state_provider.get_state(tx)
+        except Exception:  # noqa: BLE001 - rules needing state fail closed (R0)
+            state = None
+        ctx = RuleContext(tx=tx, path=Path.FAST, simulation=None, decoded=decoded, settings=self.settings,
+                          history=self.history, state=state, now=now, exclude_check=exclude)
+        return run_rules(REQUEST_RULES, ctx)
+
     def _run_sandbox(self, tx: TxRequest, state: StartingState) -> SimulationResult:
         if self.gate is None:
             return self.runner.run(tx, state)
@@ -233,6 +246,12 @@ class Guard:
                 request=tx.model_dump(mode="json", by_alias=True), release_at=v.release_at,
                 auth_nonces=[(authority_of(a, tx), a.chain_id, a.nonce) for a in tx.authorization_list or []],
             ))
+            if v.verdict in (Decision.NEEDS_HUMAN, Decision.DELAY):
+                self.history.hold(
+                    r.check_id, "needs_human" if v.verdict is Decision.NEEDS_HUMAN else "delay", now,
+                    tx.model_dump(mode="json", by_alias=True),
+                    sorted({f.rule_id for f in v.findings if f.action is not Decision.ALLOW}),
+                    v.reasons, release_at=v.release_at)
         except Exception:  # noqa: BLE001
             log.exception("could not record check %s", r.check_id)
 

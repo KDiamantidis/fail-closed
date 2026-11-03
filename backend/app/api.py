@@ -37,6 +37,7 @@ from breaker import Breaker
 from events import EventBus
 from guard import CheckResult, Guard
 from history import History
+from holds import HoldError, HoldManager
 from llm import LLMExplainer
 from sandbox_gate import GuardBusy, SandboxGate
 from sandbox_runner import SandboxRunner
@@ -45,6 +46,10 @@ from signer_mock import MockSigner, ReplayStore
 from state_provider import StaticStateProvider
 
 log = logging.getLogger(__name__)
+
+
+class DecisionRequest(BaseModel):
+    actor: str = "api-admin"  # who decides; written to the log
 
 
 class ResetRequest(BaseModel):
@@ -90,6 +95,7 @@ class Services:
         self.approver, self.signer, self.bus, self.scenarios_dir = approver, signer, bus, scenarios_dir
         self.run_id = run_id
         self.breaker = Breaker(history)
+        self.holds = HoldManager(guard, approver, signer, publish=self.publish)
 
     def publish(self, check_id: str, kind: str, data: dict) -> None:
         self.bus.publish(check_id, kind, data, run_id=self.run_id)
@@ -179,13 +185,39 @@ def create_app(services: Services | None = None) -> FastAPI:
         return {"frozen_destinations": svc.history.frozen(), "paused_wallets": svc.history.paused(),
                 "events": svc.history.events()[-50:]}
 
+    def require_admin(token: str | None) -> None:
+        expected = svc.settings.admin_token
+        if not token:
+            raise HTTPException(status_code=401, detail="X-Admin-Token header required")
+        if not expected or not secrets.compare_digest(token.encode(), expected.encode()):
+            raise HTTPException(status_code=403, detail="invalid admin token (or admin actions disabled)")
+
+    @app.get("/pending")
+    def pending() -> list[dict]:
+        """Held requests waiting: NEEDS_HUMAN (for a human) and DELAY (for the worker)."""
+        return svc.history.held("pending")
+
+    @app.post("/pending/{hold_id}/approve")
+    def approve(hold_id: str, body: DecisionRequest | None = None,
+                x_admin_token: str | None = Header(default=None)) -> dict:
+        require_admin(x_admin_token)
+        try:
+            return svc.holds.approve(hold_id, actor=(body or DecisionRequest()).actor)
+        except HoldError as e:
+            raise HTTPException(status_code=e.status, detail=e.detail)
+
+    @app.post("/pending/{hold_id}/reject")
+    def reject(hold_id: str, body: DecisionRequest | None = None,
+               x_admin_token: str | None = Header(default=None)) -> dict:
+        require_admin(x_admin_token)
+        try:
+            return svc.holds.reject(hold_id, actor=(body or DecisionRequest()).actor)
+        except HoldError as e:
+            raise HTTPException(status_code=e.status, detail=e.detail)
+
     @app.post("/breaker/reset")
     def reset(body: ResetRequest, x_admin_token: str | None = Header(default=None)) -> dict:
-        expected = svc.settings.admin_token
-        if not x_admin_token:
-            raise HTTPException(status_code=401, detail="X-Admin-Token header required")
-        if not expected or not secrets.compare_digest(x_admin_token.encode(), expected.encode()):
-            raise HTTPException(status_code=403, detail="invalid admin token (or reset disabled)")
+        require_admin(x_admin_token)
         now = time.time()
         if body.address:
             ok = svc.breaker.reset_destination(body.address, actor="api-admin", now=now)
