@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     sandbox_cpus: float = 1.0
     sandbox_pids: int = 128
     sandbox_max_concurrent: int = 4  # sandboxes at once on this host
+    sandbox_mode: str = "fresh"  # fresh: new container per check | warm: pool + snapshot/revert
+    sandbox_pool_size: int = 4  # warm: containers kept ready
+    sandbox_max_uses: int = 50  # warm: checks per container, then it is replaced
+    sandbox_max_age_seconds: float = 600.0  # warm: age limit per container
     sandbox_queue_seconds: float = 10.0  # wait for a slot, then 503 "Guard busy" (fail closed)
 
     # History (SQLite)

@@ -235,13 +235,128 @@ def validate_result(
 
 
 @dataclass
+class _Lease:
+    """A warm container, with the clean state it must be back to before every check."""
+    container: Any
+    born: float
+    limits: dict[str, Any]
+    baseline: dict[str, tuple[int, int, str]]  # account -> (balance, nonce, code) when clean
+    baseline_block: int
+    uses: int = 0
+    touched: set[str] = field(default_factory=set)  # accounts the last check changed
+
+
+@dataclass
 class _Run:
     name: str
     container: Any = None
+    lease: _Lease | None = None
     cancelled: bool = False
+    ok: bool = False
+    reverted: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
     timings: dict[str, float] = field(default_factory=dict)
     limits: dict[str, Any] = field(default_factory=dict)
+
+
+class WarmPool:
+    """K pre-started containers with anvil ready, same limits as fresh ones.
+
+    acquire(): an idle container that passes the clean check (known accounts read back
+    equal to the clean baseline, block number back to the start), else a new one.
+    release(): back to idle, unless it reached SANDBOX_MAX_USES or SANDBOX_MAX_AGE_SECONDS.
+    discard(): destroyed (any error, timeout or dirty state) and replaced in the background.
+    """
+
+    def __init__(self, runner: "SandboxRunner", size: int, max_uses: int, max_age: float,
+                 clock=time.monotonic):
+        self.runner, self.size, self.max_uses, self.max_age, self.clock = runner, size, max_uses, max_age, clock
+        self._idle: list[_Lease] = []
+        self._lock = threading.Lock()
+        self.stats = {"started": 0, "reused": 0, "dirty": 0, "discarded": 0, "retired": 0}
+
+    def _expired(self, lease: _Lease) -> bool:
+        return lease.uses >= self.max_uses or self.clock() - lease.born >= self.max_age
+
+    def new(self) -> _Lease:
+        container, limits = self.runner._start_container(anvil_args(31337), f"fc-warm-{uuid.uuid4().hex[:12]}")
+        try:
+            baseline, block = self.runner._read_baseline(container)
+        except Exception:
+            self.runner._remove(container)
+            raise
+        with self._lock:
+            self.stats["started"] += 1
+        return _Lease(container=container, born=self.clock(), limits=limits, baseline=baseline,
+                      baseline_block=block)
+
+    def prefill(self) -> None:
+        while True:
+            with self._lock:
+                if len(self._idle) >= self.size:
+                    return
+            try:
+                lease = self.new()
+            except Exception as e:  # noqa: BLE001 - checks fall back to starting one themselves
+                log.warning("warm pool prefill failed: %s", e)
+                return
+            with self._lock:
+                self._idle.append(lease)
+
+    def _refill_async(self) -> None:
+        threading.Thread(target=self.prefill, name="warm-pool-refill", daemon=True).start()
+
+    def acquire(self) -> tuple[_Lease, bool]:
+        """Returns (lease, reused)."""
+        while True:
+            with self._lock:
+                lease = self._idle.pop(0) if self._idle else None
+            if lease is None:
+                return self.new(), False
+            if self._expired(lease):
+                self._retire(lease)
+                continue
+            clean, why = self.runner._is_clean(lease)
+            if clean:
+                with self._lock:
+                    self.stats["reused"] += 1
+                return lease, True
+            log.warning("warm sandbox not clean (%s): destroyed, using another one", why)
+            with self._lock:
+                self.stats["dirty"] += 1
+            self.runner._remove(lease.container)
+            self._refill_async()
+
+    def release(self, lease: _Lease) -> None:
+        lease.uses += 1
+        if self._expired(lease):
+            self._retire(lease)
+            return
+        with self._lock:
+            self._idle.append(lease)
+
+    def discard(self, lease: _Lease) -> None:
+        with self._lock:
+            self.stats["discarded"] += 1
+        self.runner._remove(lease.container)
+        self._refill_async()
+
+    def _retire(self, lease: _Lease) -> None:
+        with self._lock:
+            self.stats["retired"] += 1
+        self.runner._remove(lease.container)
+        self._refill_async()
+
+    def shutdown(self) -> None:
+        with self._lock:
+            idle, self._idle = self._idle, []
+        for lease in idle:
+            self.runner._remove(lease.container)
+
+    @property
+    def idle(self) -> int:
+        with self._lock:
+            return len(self._idle)
 
 
 class SandboxRunner:
@@ -249,6 +364,14 @@ class SandboxRunner:
         self.settings = settings
         self._client = client
         self.clock = clock
+        self.started = 0  # containers started by this runner (fresh checks, pool, warm-up)
+        self._started_lock = threading.Lock()
+        self.pool: WarmPool | None = None
+        if settings.sandbox_mode == "warm":
+            self.pool = WarmPool(self, settings.sandbox_pool_size, settings.sandbox_max_uses,
+                                 settings.sandbox_max_age_seconds)
+        elif settings.sandbox_mode != "fresh":
+            raise ValueError(f"SANDBOX_MODE must be fresh or warm, not {settings.sandbox_mode!r}")
 
     @property
     def client(self) -> Any:
@@ -272,6 +395,7 @@ class SandboxRunner:
             future = pool.submit(self._run, run, tx, state, force_mode)
             try:
                 result = future.result(timeout=timeout)
+                run.ok = True
             except FutureTimeout:
                 raise SandboxError(f"timeout after {timeout:g}s") from None
             except SandboxError:
@@ -280,11 +404,22 @@ class SandboxRunner:
                 raise SandboxError(f"{type(e).__name__}: {e}") from e
         finally:
             t0 = self.clock()
-            self._destroy(run)
-            run.timings["destroy"] = self.clock() - t0
+            if run.lease is not None and run.ok and run.reverted:
+                self.pool.release(run.lease)  # clean again; checked once more before reuse
+                run.timings["release"] = self.clock() - t0
+            else:
+                self._destroy(run)  # fresh mode, or ANY error: never reused
+                if run.lease is not None:
+                    self.pool.discard(run.lease)
+                run.timings["destroy"] = self.clock() - t0
             pool.shutdown(wait=False, cancel_futures=True)
         result.timings = run.timings
         return result
+
+    def start_pool(self) -> None:
+        """Fill the warm pool (no-op in fresh mode). Safe to call in the background."""
+        if self.pool is not None:
+            self.pool.prefill()
 
     def warm_up(self) -> float:
         """Start and destroy one throwaway sandbox so Docker is warm before the first real
@@ -294,6 +429,7 @@ class SandboxRunner:
         try:
             c = self.client.containers.run(self.settings.sandbox_image, command=anvil_args(1),
                                            name=f"fc-warmup-{uuid.uuid4().hex[:8]}", **container_options(self.settings))
+            self._count_start()
             self._wait_ready(c)
         except Exception as e:  # noqa: BLE001
             log.warning("sandbox warm-up failed: %s", e)
@@ -311,22 +447,37 @@ class SandboxRunner:
             mode = force_mode
 
         t0 = t()
-        container = self.client.containers.run(
-            self.settings.sandbox_image,
-            command=anvil_args(tx.chain_id),
-            name=run.name,
-            **container_options(self.settings),
-        )
-        with run.lock:
-            run.container = container
-            cancelled = run.cancelled
-        if cancelled:  # timed out while the container was being created
-            self._remove(container)
-            raise SandboxError("cancelled")
-        container.reload()
-        run.limits = applied_limits(container.attrs)
-        self._wait_ready(container)
-        run.timings["container_start"] = t() - t0
+        snapshot = None
+        if self.pool is not None:
+            lease, reused = self.pool.acquire()
+            with run.lock:
+                run.container, run.lease = lease.container, lease
+                cancelled = run.cancelled
+            if cancelled:  # timed out while waiting for the lease: never put it back
+                self.pool.discard(lease)
+                raise SandboxError("cancelled")
+            container, run.limits = lease.container, lease.limits
+            self._exec(container, _rpc("anvil_setChainId", [tx.chain_id]), "set chain id")
+            snapshot = json.loads(self._exec(container, _rpc("evm_snapshot", []), "snapshot"))
+            run.timings["pool_acquire" if reused else "container_start"] = t() - t0
+        else:
+            container = self.client.containers.run(
+                self.settings.sandbox_image,
+                command=anvil_args(tx.chain_id),
+                name=run.name,
+                **container_options(self.settings),
+            )
+            self._count_start()
+            with run.lock:
+                run.container = container
+                cancelled = run.cancelled
+            if cancelled:  # timed out while the container was being created
+                self._remove(container)
+                raise SandboxError("cancelled")
+            container.reload()
+            run.limits = applied_limits(container.attrs)
+            self._wait_ready(container)
+            run.timings["container_start"] = t() - t0
 
         t0 = t()
         self._inject(container, state)
@@ -358,10 +509,69 @@ class SandboxRunner:
         probe = self._probe(container, diff)
         run.timings["probe"] = t() - t0
 
+        if snapshot is not None:
+            # back to the clean state; the lease remembers what to verify before the next use
+            t0 = t()
+            if json.loads(self._exec(container, _rpc("evm_revert", [snapshot]), "revert")) is not True:
+                raise SandboxError("warm sandbox revert failed")
+            run.lease.touched = (set(state.accounts) | set(diff.get("pre", {})) | set(diff.get("post", {}))
+                                 | {p["caller"] for p in probe})
+            run.reverted = True
+            run.timings["revert"] = t() - t0
+
         return SimulationResult(
             ok=True, receipt=receipt, state_diff=diff, tx=mined_tx, sandbox=run.limits,
             delegation_mode=mode, probe=probe,
         )
+
+    def _count_start(self) -> None:
+        with self._started_lock:
+            self.started += 1
+
+    def _start_container(self, args: list[str], name: str) -> tuple[Any, dict[str, Any]]:
+        """Start one sandbox container with the standard limits and wait until anvil answers."""
+        c = self.client.containers.run(self.settings.sandbox_image, command=args, name=name,
+                                       **container_options(self.settings))
+        self._count_start()
+        try:
+            c.reload()
+            limits = applied_limits(c.attrs)
+            self._wait_ready(c)
+        except Exception:
+            self._remove(c)
+            raise
+        return c, limits
+
+    def _read_baseline(self, c: Any) -> tuple[dict[str, tuple[int, int, str]], int]:
+        """The clean state of a new warm container: the known (dev) accounts and the block number."""
+        values = self._read_accounts(c, ANVIL_ACCOUNTS)
+        block = _int(json.loads(self._exec(c, _rpc("eth_blockNumber", []), "block number")))
+        return values, block
+
+    def _read_accounts(self, c: Any, accounts: list[str]) -> dict[str, tuple[int, int, str]]:
+        cmds = []
+        for a in accounts:
+            cmds += [_rpc("eth_getBalance", [a, "latest"]), _rpc("eth_getTransactionCount", [a, "latest"]),
+                     _rpc("eth_getCode", [a, "latest"])]
+        out = [json.loads(o) for o in self._batch(c, cmds, "read accounts")]
+        return {a: (_int(out[3 * i]), _int(out[3 * i + 1]), str(out[3 * i + 2] or "0x").lower())
+                for i, a in enumerate(accounts)}
+
+    def _is_clean(self, lease: _Lease) -> tuple[bool, str]:
+        """Read back the known accounts and every account the last check touched."""
+        try:
+            accounts = sorted(set(lease.baseline) | lease.touched)
+            now = self._read_accounts(lease.container, accounts)
+            block = _int(json.loads(self._exec(lease.container, _rpc("eth_blockNumber", []), "block number")))
+        except Exception as e:  # noqa: BLE001 - cannot prove it is clean -> not clean
+            return False, f"read-back failed: {e}"
+        if block != lease.baseline_block:
+            return False, f"block number {block} != {lease.baseline_block}"
+        for a in accounts:
+            want = lease.baseline.get(a, (0, 0, "0x"))
+            if now[a] != want:
+                return False, f"account {a} is {now[a]}, expected {want}"
+        return True, "clean"
 
     def _wait_ready(self, c: Any) -> None:
         deadline = self.clock() + READY_TIMEOUT

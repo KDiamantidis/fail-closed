@@ -1,5 +1,6 @@
 """A tiny fake of the Docker SDK + an in-memory 'anvil' so the runner can be unit-tested."""
 
+import copy
 import json
 import shlex
 import threading
@@ -40,6 +41,10 @@ class FakeChain:
         self.commands: list[list[str]] = []
         self.snapshots = 0
         self.reverts = 0
+        self.block = 0
+        self.chain_id = 1
+        self.revert_noop = False  # simulate a revert that silently leaves state behind
+        self._saved: dict[str, tuple] = {}
 
     def mined_tx(self):
         if self.mined_tx_override is not None:
@@ -79,7 +84,9 @@ class FakeChain:
             return 0, "0xf85a" + "00" * 40
         if argv[:2] == ["cast", "send"]:
             self.sends.append(argv)
-            return 0, TX_HASH if len(self.sends) == 1 else "0x" + format(len(self.sends) - 1, "064x")
+            main = self.block == 0  # the request's own tx is the first block after a clean state
+            self.block += 1
+            return 0, TX_HASH if main else "0x" + format(len(self.sends) - 1, "064x")
         if method:
             p = json.loads(argv[6])
             if method == "anvil_setBalance":
@@ -101,10 +108,21 @@ class FakeChain:
                 return 0, json.dumps(self.storage.get((p[0], p[1]), "0x" + "0" * 64))
             elif method == "evm_snapshot":
                 self.snapshots += 1
-                return 0, json.dumps(hex(self.snapshots))
+                sid = hex(self.snapshots)
+                self._saved[sid] = copy.deepcopy((self.balance, self.nonce, self.code, self.storage, self.block))
+                return 0, json.dumps(sid)
             elif method == "evm_revert":
                 self.reverts += 1
+                saved = self._saved.pop(p[0], None)
+                if saved is None:
+                    return 0, "false"
+                if not self.revert_noop:
+                    self.balance, self.nonce, self.code, self.storage, self.block = saved
                 return 0, "true"
+            elif method == "eth_blockNumber":
+                return 0, json.dumps(hex(self.block))
+            elif method == "anvil_setChainId":
+                self.chain_id = int(p[0])
             elif method == "eth_getTransactionReceipt":
                 if p[0] == TX_HASH:
                     return 0, json.dumps(self.receipt)
@@ -151,8 +169,11 @@ class FakeContainer:
 
 
 class FakeContainers:
-    def __init__(self, chain: FakeChain, run_delay: float = 0.0, run_error: Exception | None = None):
+    def __init__(self, chain: FakeChain, run_delay: float = 0.0, run_error: Exception | None = None,
+                 chain_factory=None):
         self.chain = chain
+        self.chain_factory = chain_factory  # one fresh chain per container (warm-pool tests)
+        self.chains: list[FakeChain] = []
         self.run_delay = run_delay
         self.run_error = run_error
         self.created: list[FakeContainer] = []
@@ -164,7 +185,9 @@ class FakeContainers:
             raise self.run_error
         if self.run_delay:
             time.sleep(self.run_delay)
-        c = FakeContainer(self.chain, name)
+        chain = self.chain_factory() if self.chain_factory else self.chain
+        self.chains.append(chain)
+        c = FakeContainer(chain, name)
         self.created.append(c)
         return c
 
