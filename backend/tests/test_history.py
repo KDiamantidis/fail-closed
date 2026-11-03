@@ -46,6 +46,7 @@ def test_chains_and_assets_count_every_attempt(h):
     h.record_check(rec(1, chain=10, asset=T1, verdict="BLOCK"))
     h.record_check(rec(2, chain=137, asset=T1))
     h.record_check(rec(3, chain=1, dest=D2))
+    h.record_check(rec(4, chain=56, amount=0))  # moves nothing: not a receipt of value
     assert h.chains_to(D, since=0) == {1, 10, 137}
     assert h.chains_to(D, since=1.5) == {137}
     assert h.assets_to(D, since=0) == {"1:native", f"10:{T1}", f"137:{T1}"}

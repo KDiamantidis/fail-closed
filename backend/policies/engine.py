@@ -4,15 +4,19 @@ Final verdict = the strictest action over all findings:
     any BLOCK -> BLOCK; else any NEEDS_HUMAN -> NEEDS_HUMAN; else any DELAY -> DELAY; else ALLOW.
 
 Fail closed (R0), added here so no caller can skip it:
+  - request/history rules not evaluated
   - slow path with a missing / failed / empty simulation (receipt or state diff)
+  - slow path with no simulation rules configured
+  - early path (sandbox skipped) without a BLOCK finding to justify it
   - a rule that crashes, misses an input, or returns something that is not a Finding list
-  - no rules configured, or an invalid request
+  - an invalid request
 The LLM assessment is copied into the verdict for display. It is never read when deciding,
 and an LLM failure does not change the verdict.
 """
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
+from typing import Any
 
 from app.models import (
     Decision,
@@ -35,6 +39,17 @@ class RuleContext:
     tx: TxRequest
     path: Path
     simulation: SimulationResult | None
+    decoded: Any = None  # decode.Decoded
+    settings: Any = None  # app.config.Settings
+    history: Any = None  # history.History (read-only use in rules)
+    state: Any = None  # state_provider.StartingState (Guard side)
+    now: float = 0.0
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    def need(self, *names: str) -> None:
+        for n in names:
+            if getattr(self, n) is None:
+                raise RuleInputMissing(n)
 
 
 Rule = Callable[[RuleContext], list[Finding]]
@@ -91,17 +106,36 @@ def decide(
     simulation: SimulationResult | None,
     rules: Sequence[Rule],
     llm: LLMAssessment | None = None,
+    request_findings: Sequence[Finding] | None = None,
+    context: RuleContext | None = None,
+    path_reasons: Sequence[str] = (),
 ) -> Verdict:
+    """`request_findings`: results of the request/history rules (already run by the caller).
+    `rules`: simulation rules, run here on the slow path (and on the fast path if given)."""
     findings: list[Finding] = []
     valid_request = tx is not None and isinstance(tx.wallet_type, WalletType)
 
     if not valid_request:
         findings.append(r0("Invalid request", "missing request or unknown wallet_type"))
     else:
-        if path is Path.SLOW and (problem := sandbox_problem(simulation)) is not None:
-            findings.append(r0("Sandbox failed", problem))
+        if request_findings is None:
+            findings.append(r0("Rule engine error", "request rules were not evaluated"))
         else:
-            findings.extend(run_rules(rules, RuleContext(tx=tx, path=path, simulation=simulation)))
+            findings.extend(request_findings)
+
+        ctx = context or RuleContext(tx=tx, path=path, simulation=simulation)
+        ctx = replace(ctx, tx=tx, path=path, simulation=simulation)
+
+        if path is Path.SLOW:
+            if (problem := sandbox_problem(simulation)) is not None:
+                findings.append(r0("Sandbox failed", problem))
+            else:
+                findings.extend(run_rules(rules, ctx))
+        elif path is Path.EARLY:
+            if not any(f.action is Decision.BLOCK for f in request_findings or []):
+                findings.append(r0("Rule engine error", "sandbox skipped without a BLOCK finding"))
+        elif rules:
+            findings.extend(run_rules(rules, ctx))
 
     decision = combine(findings)
     reasons = [f"[{f.rule_id}] {f.title}" + (f": {f.detail}" if f.detail else "")
@@ -116,6 +150,7 @@ def decide(
         risk_score=llm.risk_score if llm is not None else None,
         llm_mock=llm.mock if llm is not None else None,
         path=path,
+        path_reasons=list(path_reasons),
         wallet_type=tx.wallet_type if valid_request else None,
         chain_id=tx.chain_id if valid_request else None,
         trace_id=trace_id,

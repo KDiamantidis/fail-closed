@@ -173,14 +173,17 @@ class History:
         return sum(int(r["amount"]) for r in rows)
 
     def chains_to(self, destination: str, since: float) -> set[int]:
-        rows = self._rows("SELECT DISTINCT chain_id FROM checks WHERE destination = ? AND ts >= ?",
-                          (destination, since))
+        """Chains from which value was sent (or attempted) to `destination`."""
+        rows = self._rows(
+            "SELECT DISTINCT chain_id FROM checks WHERE destination = ? AND ts >= ? AND amount != '0'",
+            (destination, since))
         return {r["chain_id"] for r in rows}
 
     def assets_to(self, destination: str, since: float) -> set[str]:
         """Distinct assets as 'chain_id:asset' (the same token address on two chains is two assets)."""
-        rows = self._rows("SELECT DISTINCT chain_id, asset FROM checks WHERE destination = ? AND ts >= ?",
-                          (destination, since))
+        rows = self._rows(
+            "SELECT DISTINCT chain_id, asset FROM checks WHERE destination = ? AND ts >= ? AND amount != '0'",
+            (destination, since))
         return {f"{r['chain_id']}:{r['asset']}" for r in rows}
 
     def recent_auth_nonces(self, authority: str, since: float) -> list[tuple[int, int]]:

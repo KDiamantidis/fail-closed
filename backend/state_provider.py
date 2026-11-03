@@ -28,6 +28,21 @@ class AccountState(BaseModel):
     # Runtime bytecode as hex, or "artifact:<Name>" for code compiled into the sandbox image.
     code: str | None = None
     storage: dict[str, str] = Field(default_factory=dict)  # slot -> value, both 32-byte hex
+    # ERC-20 balances held by this account: token address -> amount (base units).
+    # Injected into the token's balanceOf mapping (slot 0, MockToken layout).
+    token_balances: dict[str, int] = Field(default_factory=dict)
+
+    @field_validator("token_balances", mode="before")
+    @classmethod
+    def _token_balances(cls, v: object) -> dict[str, int]:
+        if not isinstance(v, dict):
+            raise ValueError("token_balances must be an object")
+        out = {}
+        for token, amount in v.items():
+            if not isinstance(token, str) or not _ADDRESS.match(token):
+                raise ValueError(f"bad token address: {token}")
+            out[token.lower()] = parse_uint(amount)
+        return out
 
     @field_validator("balance", mode="before")
     @classmethod

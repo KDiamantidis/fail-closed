@@ -32,8 +32,9 @@ def emits(*findings: Finding):
     return rule
 
 
-def run(rules, sim=SIM_OK, path=Path.SLOW, llm=None, request=TX):
-    return decide(trace_id="t", tx=request, path=path, simulation=sim, rules=rules, llm=llm)
+def run(rules, sim=SIM_OK, path=Path.SLOW, llm=None, request=TX, request_findings=()):
+    return decide(trace_id="t", tx=request, path=path, simulation=sim, rules=rules, llm=llm,
+                  request_findings=list(request_findings) if request_findings is not None else None)
 
 
 # --- strictest wins -------------------------------------------------------------
@@ -183,6 +184,36 @@ def test_unknown_wallet_type_blocks():
 def test_verdict_carries_request_context():
     v = run([emits()])
     assert (v.wallet_type, v.chain_id, v.path) == (TX.wallet_type, 1, Path.SLOW)
+
+
+# --- request findings and the early path -----------------------------------------
+
+def test_request_findings_are_combined_with_simulation_rules():
+    v = run([emits(f(Decision.DELAY, "R7"))], request_findings=[f(Decision.NEEDS_HUMAN, "C1")])
+    assert v.verdict == Decision.NEEDS_HUMAN
+    assert [x.rule_id for x in v.findings] == ["C1", "R7"]
+
+
+def test_request_rules_not_evaluated_blocks():
+    v = run([emits()], request_findings=None)
+    assert v.verdict == Decision.BLOCK and "not evaluated" in v.reasons[0]
+
+
+def test_request_block_survives_sandbox_failure():
+    v = run([emits()], sim=None, request_findings=[f(Decision.BLOCK, "F1")])
+    assert [x.rule_id for x in v.findings] == ["F1", "R0"]
+
+
+def test_early_path_needs_a_block_finding():
+    ok = run([], sim=None, path=Path.EARLY, request_findings=[f(Decision.BLOCK, "R5")])
+    assert ok.verdict == Decision.BLOCK and [x.rule_id for x in ok.findings] == ["R5"]
+    bad = run([], sim=None, path=Path.EARLY, request_findings=[f(Decision.DELAY, "R7")])
+    assert bad.verdict == Decision.BLOCK and "sandbox skipped" in bad.reasons[-1]
+
+
+def test_fast_path_with_request_findings_only():
+    v = run([], sim=None, path=Path.FAST, request_findings=[])
+    assert v.verdict == Decision.ALLOW and v.findings == []
 
 
 def test_block_helper():

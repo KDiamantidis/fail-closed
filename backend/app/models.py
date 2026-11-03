@@ -104,8 +104,13 @@ _RANK = {d: i for i, d in enumerate(Decision)}
 
 
 class Path(StrEnum):
-    FAST = "fast"  # deterministic only, no sandbox, no LLM
-    SLOW = "slow"  # fresh sandbox + state diff + rules (+ LLM explanation)
+    FAST = "fast"  # known-safe shape, request/history rules only, no sandbox
+    SLOW = "slow"  # fresh sandbox + state diff + simulation rules
+    EARLY = "early"  # request/history rules already said BLOCK; sandbox skipped
+
+
+class Effect(StrEnum):
+    FREEZE_DESTINATION = "freeze_destination"  # circuit breaker level 1
 
 
 class Finding(BaseModel):
@@ -117,6 +122,8 @@ class Finding(BaseModel):
     action: Decision
     title: str
     detail: str = ""
+    subject: str | None = None  # the address the finding is about (e.g. to freeze)
+    effect: Effect | None = None  # breaker side effect requested by the rule
 
 
 class SimulationResult(BaseModel):
@@ -127,6 +134,8 @@ class SimulationResult(BaseModel):
     receipt: dict[str, Any] | None = None
     state_diff: dict[str, Any] | None = None  # prestateTracer diffMode: {"pre": ..., "post": ...}
     tx: dict[str, Any] | None = None  # the mined tx as seen by the chain (incl. authorizationList)
+    delegation_mode: str | None = None  # "type4" (real EIP-7702 tx) | "effect" (simulated effect) | None
+    probe: list[dict[str, Any]] = Field(default_factory=list)  # post-delegation probe calls
     timings: dict[str, float] = Field(default_factory=dict)  # seconds per step
     sandbox: dict[str, Any] = Field(default_factory=dict)  # applied container limits (docker inspect)
 
@@ -154,6 +163,8 @@ class Verdict(BaseModel):
     risk_score: int | None = None
     llm_mock: bool | None = None
     path: Path | None = None
+    path_reasons: list[str] = Field(default_factory=list)
+    release_at: float | None = None  # DELAY: when the hold ends
     wallet_type: WalletType | None = None
     chain_id: int | None = None
     trace_id: str
