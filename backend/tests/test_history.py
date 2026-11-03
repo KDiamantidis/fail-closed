@@ -66,7 +66,8 @@ def test_freeze_is_latched_until_reset(h):
     assert h.is_frozen(D2) is None
     assert h.unfreeze(D, actor="alice", now=3) is True
     assert h.is_frozen(D) is None
-    assert [e["action"] for e in h.events()] == ["freeze_destination", "freeze_destination", "reset_destination"]
+    assert h.unfreeze(D, actor="alice", now=4) is False  # nothing to reset
+    assert [e["action"] for e in h.events()] == ["freeze_destination", "reset_destination"]
     assert h.events()[-1]["actor"] == "alice"
 
 

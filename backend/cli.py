@@ -204,6 +204,34 @@ def run_scenario(path: Path, as_json: bool) -> int:
     return 0 if sim is not None else 1
 
 
+def print_breaker(history) -> None:
+    frozen, paused = history.frozen(), history.paused()
+    print("--- circuit breaker (latched until a human resets) ---")
+    print(f"frozen destinations (level 1): {len(frozen)}")
+    for r in frozen:
+        print(f"  {r['address']}  {r['reason']}")
+    print(f"paused wallets (level 2): {len(paused)}")
+    for r in paused:
+        print(f"  {r['wallet']}  {r['reason']}")
+
+
+def cmd_reset(db: str, address: str | None, wallet: str | None, actor: str) -> int:
+    from breaker import Breaker
+    from history import History
+
+    h = History(db)
+    b = Breaker(h)
+    now = time.time()
+    if address:
+        ok = b.reset_destination(address, actor=actor, now=now)
+        print(f"{'reset' if ok else 'not frozen'}: destination {address.lower()} (by {actor}, logged)")
+    else:
+        ok = b.reset_wallet(wallet, actor=actor, now=now)
+        print(f"{'reset' if ok else 'not paused'}: wallet {wallet.lower()} (by {actor}, logged)")
+    print_breaker(h)
+    return 0 if ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     ap = argparse.ArgumentParser(prog="fail-closed")
@@ -211,9 +239,24 @@ def main(argv: list[str] | None = None) -> int:
     sc = sub.add_parser("scenario", help="run a scenario directory end to end")
     sc.add_argument("path", type=Path)
     sc.add_argument("--json", action="store_true", help="print raw JSON instead of the report")
+    rs = sub.add_parser("reset", help="human reset of a latched freeze or pause (logged)")
+    target = rs.add_mutually_exclusive_group(required=True)
+    target.add_argument("--address", help="unfreeze a destination address (level 1)")
+    target.add_argument("--wallet", help="unpause a wallet (level 2)")
+    rs.add_argument("--actor", default="cli", help="who resets (written to the log)")
+    rs.add_argument("--db", default=None, help="history database (default: HISTORY_DB)")
+    br = sub.add_parser("breaker", help="show frozen destinations and paused wallets")
+    br.add_argument("--db", default=None)
     args = ap.parse_args(argv)
     if args.cmd == "scenario":
         return run_scenario(args.path, args.json)
+    if args.cmd == "reset":
+        return cmd_reset(args.db or get_settings().history_db, args.address, args.wallet, args.actor)
+    if args.cmd == "breaker":
+        from history import History
+
+        print_breaker(History(args.db or get_settings().history_db))
+        return 0
     return 2
 
 

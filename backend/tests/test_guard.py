@@ -214,6 +214,40 @@ def test_authorization_nonces_are_recorded_for_r2():
     assert any(f.rule_id == "R2" and "consecutive" in f.detail for f in r.verdict.findings)
 
 
+# --- breaker effects reach the next request -------------------------------------------
+
+def guarded_with_breaker(**kw):
+    from breaker import Breaker
+
+    g = guard(**kw)
+    g.breaker = Breaker(g.history)
+    return g
+
+
+def test_r1_block_pauses_wallet_and_next_request_hits_f2():
+    sim = SimulationResult(ok=True, receipt={"status": "0x1", "logs": []},
+                           state_diff={"pre": {HOT: {"balance": hex(1000 * ETH), "nonce": 7}},
+                                       "post": {HOT: {"code": "0xef0100" + SWEEPER[2:], "nonce": 8}}})
+    g = guarded_with_breaker(runner=FakeRunner(sim=sim))
+    r = g.check(req(to=HOT, value=0, authorization_list=[{"chain_id": 1, "address": SWEEPER, "nonce": 7}]))
+    assert r.breaker_actions == [f"level 2: paused wallet {HOT} (R1)"]
+    nxt = g.check(req())  # an ordinary withdrawal from the paused wallet
+    assert (nxt.verdict.verdict, nxt.verdict.path) == (Decision.BLOCK, Path.EARLY)
+    assert [f.rule_id for f in nxt.verdict.findings] == ["F2"]
+
+
+def test_r7_freeze_blocks_that_destination_only():
+    g = guarded_with_breaker()
+    for i, chain in enumerate((1, 10, 42161, 137)):
+        g.clock = lambda i=i: NOW + i
+        g.check(req(to=ATT, chain_id=chain))
+    g.clock = lambda: NOW + 10
+    r = g.check(req(to=ATT, chain_id=43114))
+    assert r.verdict.verdict is Decision.BLOCK and r.breaker_actions == [f"level 1: froze destination {ATT} (R7)"]
+    assert g.check(req(to=ATT, chain_id=1)).verdict.findings[0].rule_id == "F1"
+    assert g.check(req(to=CUST, chain_id=1)).verdict.verdict is Decision.ALLOW  # others keep going
+
+
 @pytest.mark.parametrize("escalation", [True, False])
 def test_llm_never_changes_the_verdict(escalation):
     verdicts = set()

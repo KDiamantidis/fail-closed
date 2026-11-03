@@ -29,6 +29,24 @@ def test_auth_outcomes_wrong_chain_skipped():
     assert auth_outcomes([{"chainId": "0x38", "nonce": "0x7"}], 7, 1) == ["skipped (wrong chain)"]
 
 
+def test_reset_commands(tmp_path, capsys):
+    from history import History
+
+    db = str(tmp_path / "h.sqlite3")
+    h = History(db)
+    h.freeze("0x" + "ba" * 20, "R8: test", now=1)
+    h.pause("0x" + "a1" * 20, "R1 BLOCK", now=1)
+    h.close()
+    assert main(["reset", "--address", "0x" + "BA" * 20, "--actor", "ops", "--db", db]) == 0
+    assert main(["reset", "--wallet", "0x" + "a1" * 20, "--db", db]) == 0
+    assert main(["reset", "--wallet", "0x" + "a1" * 20, "--db", db]) == 1  # already reset
+    out = capsys.readouterr().out
+    assert "reset: destination" in out and "not paused" in out
+    events = History(db).events()
+    assert [e["action"] for e in events][-2:] == ["reset_destination", "reset_wallet"]
+    assert events[-2]["actor"] == "ops"
+
+
 @pytest.mark.docker
 def test_7702_scenario_end_to_end(capsys):
     assert main(["scenario", str(SCENARIO)]) == 0

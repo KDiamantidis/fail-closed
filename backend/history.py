@@ -131,9 +131,11 @@ class History:
         with self.lock, self.conn:
             cur = self.conn.execute(
                 "INSERT OR IGNORE INTO frozen_destinations VALUES (?,?,?,?)", (address, reason, now, check_id))
+            if cur.rowcount != 1:
+                return False  # already frozen: latched, first reason kept
             self.conn.execute("INSERT INTO breaker_events VALUES (?,?,?,?,?)",
                               (now, "freeze_destination", address, reason, actor))
-            return cur.rowcount == 1
+            return True
 
     def pause(self, wallet: str, reason: str, now: float, check_id: str | None = None,
               actor: str = "guard") -> bool:
@@ -141,23 +143,29 @@ class History:
         with self.lock, self.conn:
             cur = self.conn.execute(
                 "INSERT OR IGNORE INTO paused_wallets VALUES (?,?,?,?)", (wallet, reason, now, check_id))
+            if cur.rowcount != 1:
+                return False  # already paused: latched, first reason kept
             self.conn.execute("INSERT INTO breaker_events VALUES (?,?,?,?,?)",
                               (now, "pause_wallet", wallet, reason, actor))
-            return cur.rowcount == 1
+            return True
 
     def unfreeze(self, address: str, actor: str, now: float, reason: str = "manual reset") -> bool:
         with self.lock, self.conn:
             cur = self.conn.execute("DELETE FROM frozen_destinations WHERE address = ?", (address,))
+            if cur.rowcount != 1:
+                return False
             self.conn.execute("INSERT INTO breaker_events VALUES (?,?,?,?,?)",
                               (now, "reset_destination", address, reason, actor))
-            return cur.rowcount == 1
+            return True
 
     def unpause(self, wallet: str, actor: str, now: float, reason: str = "manual reset") -> bool:
         with self.lock, self.conn:
             cur = self.conn.execute("DELETE FROM paused_wallets WHERE wallet = ?", (wallet,))
+            if cur.rowcount != 1:
+                return False
             self.conn.execute("INSERT INTO breaker_events VALUES (?,?,?,?,?)",
                               (now, "reset_wallet", wallet, reason, actor))
-            return cur.rowcount == 1
+            return True
 
     # ---- reads -----------------------------------------------------------------
 
