@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # History (SQLite)
     history_db: str = str(REPO_ROOT / "data" / "history.sqlite3")
 
+    # Guard approval key (ed25519). Outside the repo, owner-only. Never in the sandbox.
+    guard_key_path: str = str(Path.home() / ".fail-closed" / "guard_ed25519.pem")
+    approval_ttl_seconds: int = 120
+
     # Guard-side policy lists (JSON arrays in env). Addresses are normalized to lowercase.
     known_tokens: list[str] = []  # ERC-20s whose transfer() counts as a plain withdrawal
     delegate_allowlist: list[str] = []  # EIP-7702 delegates that are allowed (R1)

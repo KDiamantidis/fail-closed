@@ -10,6 +10,7 @@ dependencies = [
     "pydantic-settings>=2.4",
     "openai>=1.50",
     "docker>=7.1",
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]
@@ -24,7 +25,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["app", "policies"]
-py-modules = ["state_provider", "sandbox_runner", "llm", "cli", "decode", "history", "guard", "breaker", "scenario"]
+py-modules = ["state_provider", "sandbox_runner", "llm", "cli", "decode", "history", "guard", "breaker", "scenario", "approval"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
