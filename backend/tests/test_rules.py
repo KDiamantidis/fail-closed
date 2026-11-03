@@ -136,7 +136,8 @@ def test_r2_history_window_and_chain():
 def test_r3_request_native_share_of_balance():
     assert r3_request_outflow(ctx(req(value=250 * ETH))) == []  # exactly 25 %
     [f] = r3_request_outflow(ctx(req(value=251 * ETH)))
-    assert f.action == Decision.BLOCK and "25.1%" in f.detail
+    # Guard balances only, no sandbox evidence: a human decides, never BLOCK
+    assert f.action == Decision.NEEDS_HUMAN and "25.1%" in f.detail and "without evidence" in f.detail
 
 
 def test_r3_request_unknown_wallet_has_no_balance():
@@ -313,6 +314,31 @@ def test_r3_sim_probe_evidence():
               "call": "sweep()", "native_out": {ATT: str(1000 * ETH)}, "token_out": []}]
     [f] = r3_simulation_outflow(ctx(req(), sim=sim(diff, probe=probe)))
     assert "probe" in f.detail and "sweep()" in f.detail and "100.0%" in f.detail
+
+
+def test_r3_sim_declared_large_withdrawal_is_not_sandbox_evidence():
+    # the honest 400 ETH withdrawal shows up in the diff, but it is exactly what was asked
+    diff = {"pre": {HOT: {"balance": hex(1000 * ETH)}, CUST: {"balance": "0x0"}},
+            "post": {HOT: {"balance": hex(600 * ETH)}, CUST: {"balance": hex(400 * ETH)}}}
+    assert r3_simulation_outflow(ctx(req(value=400 * ETH), sim=sim(diff))) == []
+
+
+def test_r3_sim_hidden_extra_outflow_to_the_same_address_blocks():
+    diff = {"pre": {HOT: {"balance": hex(1000 * ETH)}, CUST: {"balance": "0x0"}},
+            "post": {HOT: {"balance": hex(0)}, CUST: {"balance": hex(1000 * ETH)}}}
+    [f] = r3_simulation_outflow(ctx(req(value=ETH), sim=sim(diff)))
+    assert f.action == Decision.BLOCK and "999 ETH" in f.detail and "did not declare" in f.detail
+
+
+def test_r3_sim_declared_token_transfer_skipped_extra_log_counted():
+    def log(to, amt):
+        return {"address": TOKEN, "topics": [TRANSFER_TOPIC, "0x" + HOT[2:].rjust(64, "0"),
+                                             "0x" + to[2:].rjust(64, "0")], "data": hex(amt)}
+    diff = {"pre": {HOT: {"nonce": 1}}, "post": {HOT: {"nonce": 2}}}
+    t = req(to=TOKEN, value=0, data=erc20(CUST, 400_000 * ETH))
+    assert r3_simulation_outflow(ctx(t, sim=sim(diff, logs=[log(CUST, 400_000 * ETH)]))) == []
+    [f] = r3_simulation_outflow(ctx(t, sim=sim(diff, logs=[log(CUST, 400_000 * ETH), log(ATT, 600_000 * ETH)])))
+    assert f.subject == ATT
 
 
 def test_r3_sim_small_customer_withdrawal_is_fine():

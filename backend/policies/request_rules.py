@@ -76,7 +76,8 @@ def r2_authorizations(ctx: RuleContext) -> list[Finding]:
 
 
 def r3_request_outflow(ctx: RuleContext) -> list[Finding]:
-    """R3 before simulation, from the decoded transfer and the Guard-side starting state."""
+    """R3 before simulation, from the decoded transfer and the Guard-side starting state.
+    No sandbox evidence -> NEEDS_HUMAN, never BLOCK, and never pauses the wallet."""
     ctx.need("decoded", "settings", "state")
     d = ctx.decoded
     if d.kind not in (Kind.NATIVE_TRANSFER, Kind.ERC20_TRANSFER) or d.amount == 0:
@@ -93,11 +94,15 @@ def r3_request_outflow(ctx: RuleContext) -> list[Finding]:
         balance = acct.token_balances[d.asset]
     limit = ctx.settings.r3_max_single_dest_pct
     if balance == 0 or over_pct(d.amount, balance, limit):
+        # No sandbox evidence of a drain here, only the Guard's balances: an honest large
+        # withdrawal looks the same, so a human decides (principle 6). Sandbox evidence of a
+        # hidden drain is the simulation-level R3, which blocks.
         return [Finding(
-            rule_id="R3", action=Decision.BLOCK, subject=d.destination,
-            title=f"Wallet would lose more than {limit:g}% of its balance to one address",
+            rule_id="R3", action=Decision.NEEDS_HUMAN, subject=d.destination,
+            title=f"Withdrawal is more than {limit:g}% of the wallet balance",
             detail=f"{amount(d.asset, d.amount)} of {amount(d.asset, balance)} "
-                   f"({pct(d.amount, balance)}) to {d.destination}.")]
+                   f"({pct(d.amount, balance)}) to {d.destination}. Based on the Guard's balances "
+                   "only, without evidence of a drain: a human confirms.")]
     return []
 
 

@@ -1,7 +1,9 @@
 """Circuit breaker, levels 1-2. Every step is latched until a human resets it.
 
 Level 1: freeze one destination address (requested by R7 >= 5 chains or R8).
-Level 2: pause one wallet (any R1, R2 or R3 BLOCK on that wallet).
+Level 2: pause one wallet on R1, R2, or R3 with sandbox evidence. Only the simulation-level
+         R3 can BLOCK; the request-level R3 (Guard balances only) is NEEDS_HUMAN and never
+         pauses, so an honest large withdrawal does not stop the other customers.
 Levels 3-4 (safe mode per chain, global stop with >= 2 independent signals): Phase 3.
 
 The freeze / pause takes effect on the next request through rules F1 / F2.

@@ -75,9 +75,13 @@ def lab(sc: Scenario, addr: str) -> str:
     return f"{addr} ({name})" if name else addr
 
 
-def expect_status(r: ScenarioRequest, res: CheckResult) -> str:
+def expect_status(r: ScenarioRequest, res: CheckResult, history: History | None = None) -> str:
     v = res.verdict
     problems = []
+    if r.expect.wallet_paused is not None and history is not None:
+        paused = history.is_paused(r.tx().from_) is not None
+        if paused != r.expect.wallet_paused:
+            problems.append(f"wallet paused={paused}, expected {r.expect.wallet_paused}")
     if r.expect.verdict and v.verdict.value != r.expect.verdict:
         problems.append(f"verdict {v.verdict.value} != {r.expect.verdict}")
     if r.expect.path and (v.path.value if v.path else None) != r.expect.path:
@@ -104,14 +108,57 @@ def fresh_history(db: str) -> History:
 
 
 def run_file(sc: Scenario, guard: Guard, clock: dict, base_t: float, report: bool):
+    """Run every request; each expectation is checked right after its own request."""
     results = []
     for i, r in enumerate(sc.requests, 1):
         clock["now"] = base_t + r.t
         res = guard.check(r.tx())
-        results.append((r, res))
+        status = expect_status(r, res, guard.history)
+        results.append((r, res, status))
         if report:
-            print_check(sc, i, r, res, guard)
+            print_check(sc, i, r, res, guard, status)
     return results
+
+
+def blast_radius(history: History, sc: Scenario) -> list[str]:
+    """For each frozen destination in this scenario: value that was ALLOWed to it before the
+    freeze (and value held by DELAY, which the freeze keeps from being released)."""
+    lines = []
+    addrs = {r.tx().to for r in sc.requests} | {
+        "0x" + r.tx().data[34:74] for r in sc.requests if r.tx().data.startswith("0xa9059cbb")}
+    for row in history.frozen():
+        addr = row["address"]
+        if addr not in addrs:
+            continue
+        allowed: dict[tuple[int, str], int] = {}
+        held: dict[tuple[int, str], int] = {}
+        for c in history.checks_to(addr):
+            if c["ts"] > row["ts"]:
+                break
+            bucket = allowed if c["verdict"] == "ALLOW" else held if c["verdict"] == "DELAY" else None
+            if bucket is not None:
+                bucket[(c["chain_id"], c["asset"])] = bucket.get((c["chain_id"], c["asset"]), 0) + c["amount"]
+        lines.append(f"blast radius for {lab(sc, addr)}, frozen by {row['reason'].split(':')[0]}:")
+        for title, bucket in (("ALLOWED before the freeze (would have been signed)", allowed),
+                              ("held by DELAY (the freeze is a new signal, so they are not released)", held)):
+            lines.append(f"  {title}:")
+            if not bucket:
+                lines.append("    nothing")
+            for chain in sorted({k[0] for k in bucket}):
+                parts = []
+                for (c, asset), amt in sorted(bucket.items(), key=lambda kv: (kv[0][0], kv[0][1] != "native", kv[0][1])):
+                    if c == chain:
+                        units = Decimal(amt) / Decimal(10**18)
+                        name = "ETH" if asset == "native" else (sc.label(asset) or asset)
+                        parts.append(f"{units.normalize():f} {name}")
+                lines.append(f"    chain {chain:>6}: " + ", ".join(parts))
+            native = sum(v for (c, a), v in bucket.items() if a == "native")
+            tokens = sum(v for (c, a), v in bucket.items() if a != "native")
+            if bucket:
+                lines.append(f"    total: {Decimal(native) / Decimal(10**18):f} ETH + "
+                             f"{Decimal(tokens) / Decimal(10**18):,f} tokens "
+                             f"({len({a for (_, a) in bucket if a != 'native'})} token types)")
+    return lines
 
 
 def cmd_run_all(directory: Path, db: str) -> int:
@@ -119,14 +166,16 @@ def cmd_run_all(directory: Path, db: str) -> int:
     history = fresh_history(db)
     clock = {"now": T0}
     rows = []
+    radius: list[str] = []
     files = discover(directory)
     for n, path in enumerate(files):
         sc = load(path)
         guard = make_guard(sc, base, history, clock)
-        for r, res in run_file(sc, guard, clock, T0 + n * DAY, report=False):
-            rows.append((sc, r, res))
+        for r, res, status in run_file(sc, guard, clock, T0 + n * DAY, report=False):
+            rows.append((sc, r, res, status))
+        radius += blast_radius(history, sc)
 
-    ok = all(expect_status(r, res) == "OK" for _, r, res in rows)
+    ok = all(status == "OK" for *_, status in rows)
     mode = LLMExplainer(base).mode
     print(f"Fail Closed | run-all | {len(files)} scenarios, {len(rows)} requests | "
           f"LLM: {mode.upper()}{' (no model called)' if mode == 'mock' else ''}")
@@ -134,18 +183,21 @@ def cmd_run_all(directory: Path, db: str) -> int:
     print(head)
     print("-" * len(head))
     last = None
-    for sc, r, res in rows:
+    for sc, r, res, status in rows:
         v = res.verdict
         rules = ",".join(dict.fromkeys(f.rule_id for f in v.findings if f.action is not Decision.ALLOW)) or "-"
         name = sc.name if sc.name != last else ""
         idx = sc.requests.index(r) + 1
         print(f"{name:<34} {idx:>2}  {r.label[:44]:<44} {v.path.value if v.path else '-':<5} "
-              f"{v.verdict.value:<11} {rules:<16} {res.timings.get('total', 0) * 1000:6.0f}  {expect_status(r, res)}")
+              f"{v.verdict.value:<11} {rules:<16} {res.timings.get('total', 0) * 1000:6.0f}  {status}")
         for a in res.breaker_actions:
             print(f"{'':<38}  -> breaker {a}")
         last = sc.name
     print("")
     print_breaker(history)
+    if radius:
+        print("")
+        print("\n".join(radius))
     print("")
     print("all expectations met" if ok else "SOME EXPECTATIONS NOT MET")
     return 0 if ok else 1
@@ -159,12 +211,16 @@ def cmd_scenario(path: Path, db: str) -> int:
     results = run_file(sc, guard, clock, T0, report=True)
     print("")
     print_breaker(history)
-    return 0 if all(expect_status(r, res) == "OK" for r, res in results) else 1
+    if lines := blast_radius(history, sc):
+        print("")
+        print("\n".join(lines))
+    return 0 if all(status == "OK" for *_, status in results) else 1
 
 
 # ---- reports -----------------------------------------------------------------------
 
-def print_check(sc: Scenario, i: int, r: ScenarioRequest, res: CheckResult, guard: Guard) -> None:
+def print_check(sc: Scenario, i: int, r: ScenarioRequest, res: CheckResult, guard: Guard,
+                status: str) -> None:
     p = print
     tx, v, d, sim = r.tx(), res.verdict, res.decoded, res.simulation
     p("=" * 86)
@@ -247,7 +303,7 @@ def print_check(sc: Scenario, i: int, r: ScenarioRequest, res: CheckResult, guar
         if f.detail:
             p(f"           {f.detail}")
     p("")
-    p(f"VERDICT : {v.verdict.value}   (expected {r.expect.verdict}: {expect_status(r, res)})")
+    p(f"VERDICT : {v.verdict.value}   (expected {r.expect.verdict}: {status})")
     if v.release_at:
         p(f"          held until t+{v.release_at - T0:.0f}s, then released if no other signal")
     for a in res.breaker_actions:

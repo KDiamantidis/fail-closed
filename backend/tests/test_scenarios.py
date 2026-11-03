@@ -31,8 +31,17 @@ class NeutralRunner:
                                             "post": {"0x" + "ee" * 20: {"nonce": 1}}})
 
 
+def neutral_guard(name):
+    sc = load(SCENARIOS / f"{name}.json")
+    settings = sc.settings(Settings(llm_mode="mock"))
+    history = History()
+    g = Guard(settings, history, ScenarioStateProvider(sc.path), NeutralRunner(), LLMExplainer(settings),
+              breaker=Breaker(history))
+    return sc, g
+
+
 def test_expected_scenarios_exist_in_order():
-    assert [p.stem[:2] for p in FILES] == ["a_", "b_", "c_", "d_", "e_"]
+    assert [p.stem[:2] for p in FILES] == ["a_", "b_", "c_", "d_", "e_", "f_"]
 
 
 @pytest.mark.parametrize("path", FILES, ids=lambda p: p.stem)
@@ -58,18 +67,32 @@ def test_mercado_tokens_are_known_transfers():
 
 
 @pytest.mark.parametrize("name", ["a_customer_small_withdrawal", "b_treasury_allowlisted_above_limit",
-                                  "c_treasury_unknown_above_limit", "e_mercado_multichain"])
+                                  "c_treasury_unknown_above_limit", "e_mercado_multichain",
+                                  "f_honest_large_withdrawal"])
 def test_scenario_reaches_expected_verdicts_with_neutral_sandbox(name):
-    sc = load(SCENARIOS / f"{name}.json")
-    settings = sc.settings(Settings(llm_mode="mock"))
-    history = History()
-    clock = {"now": 1_000_000.0}
-    g = Guard(settings, history, ScenarioStateProvider(sc.path), NeutralRunner(), LLMExplainer(settings),
-              breaker=Breaker(history), clock=lambda: clock["now"])
+    sc, g = neutral_guard(name)
     for r in sc.requests:
-        clock["now"] = 1_000_000.0 + r.t
+        g.clock = lambda r=r: 1_000_000.0 + r.t
         v = g.check(r.tx()).verdict
+        if r.expect.wallet_paused is not None:
+            assert (g.history.is_paused(r.tx().from_) is not None) == r.expect.wallet_paused, r.label
         assert v.verdict.value == r.expect.verdict, (r.label, v.reasons)
         if r.expect.path:
             assert v.path.value == r.expect.path, (r.label, v.path_reasons)
         assert set(r.expect.rules) <= {f.rule_id for f in v.findings}, (r.label, v.reasons)
+
+
+def test_mercado_blast_radius_counts_only_allowed_before_the_freeze():
+    from cli import blast_radius
+
+    sc, g = neutral_guard("e_mercado_multichain")
+    for r in sc.requests:
+        g.clock = lambda r=r: 1_000_000.0 + r.t
+        g.check(r.tx())
+    text = "\n".join(blast_radius(g.history, sc))
+    assert "frozen by R7" in text
+    assert "chain      1: 40.0001 ETH, 50000 MOCK01" in text
+    assert "chain     10: 50000 MOCK06" in text
+    assert "total: 40.0001 ETH + 300,000 tokens (6 token types)" in text  # MOCK01-06 allowed
+    assert "chain  42161: 50000 MOCK07" in text and "chain    137: 50000 MOCK08" in text  # held
+    assert "MOCK10" not in text  # blocked after the freeze: never counted

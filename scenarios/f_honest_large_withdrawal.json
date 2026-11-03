@@ -1,0 +1,40 @@
+{
+  "name": "f_honest_large_withdrawal",
+  "title": "(f) Customer hot wallet: honest large withdrawal (more than 25% of the wallet)",
+  "description": "A real customer withdraws 40 ETH from a hot wallet holding 100 ETH. R3 sees more than 25% of the balance, but only from the Guard's balances; the sandbox shows nothing beyond the declared transfer. A human confirms (NEEDS_HUMAN), the wallet is NOT paused, and the next customer is served normally.",
+  "labels": {
+    "0x1000000000000000000000000000000000000f01": "customer hot wallet",
+    "0xc000000000000000000000000000000000000f01": "customer with a large withdrawal",
+    "0xc000000000000000000000000000000000000f02": "another customer"
+  },
+  "policy": {},
+  "state": {
+    "accounts": {
+      "0x1000000000000000000000000000000000000f01": {"balance": "100000000000000000000", "nonce": 900}
+    }
+  },
+  "requests": [
+    {
+      "t": 0,
+      "label": "40 ETH to a customer (40% of the wallet)",
+      "expect": {"verdict": "NEEDS_HUMAN", "path": "slow", "rules": ["R3"], "wallet_paused": false},
+      "request": {
+        "wallet_type": "customer_hot", "chain_id": 1,
+        "from": "0x1000000000000000000000000000000000000f01",
+        "to": "0xc000000000000000000000000000000000000f01",
+        "data": "0x", "value": "40000000000000000000"
+      }
+    },
+    {
+      "t": 60,
+      "label": "next customer: 1 ETH",
+      "expect": {"verdict": "ALLOW", "path": "fast", "wallet_paused": false},
+      "request": {
+        "wallet_type": "customer_hot", "chain_id": 1,
+        "from": "0x1000000000000000000000000000000000000f01",
+        "to": "0xc000000000000000000000000000000000000f02",
+        "data": "0x", "value": "1000000000000000000"
+      }
+    }
+  ]
+}

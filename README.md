@@ -74,7 +74,8 @@ R0, R1, R2, R3 and the breaker checks F1 (destination frozen) / F2 (wallet pause
 | R0 | Sandbox, trace, diff or receipt failed or empty; or a rule crashed or missed an input | all | BLOCK |
 | R1 | An account gets delegation code (`0xef0100…`) to a contract not on the allowlist | all | BLOCK |
 | R2 | More than one authorization in a request, or authorizations for consecutive nonces | all | BLOCK |
-| R3 | A wallet loses more than X% of its balance to one non-allowlisted address (checked before the sandbox from the Guard's balances, and after it from the diff, token Transfer logs and the delegation probe) | all | BLOCK |
+| R3 | A wallet loses more than X% of its balance to one non-allowlisted address. **Without sandbox evidence** (the requested amount vs. the Guard's balances: an honest large withdrawal looks the same) | all | NEEDS_HUMAN |
+| R3 | The same, **with sandbox evidence**: an outflow the request did not declare (state diff, token Transfer logs) or funds moved by the delegation probe | all | BLOCK |
 | R4 | Amount above limit | treasury | NEEDS_HUMAN |
 | R5 | Destination not on the allowlist | treasury | NEEDS_HUMAN (BLOCK if also above limit) |
 | R6 | Wallet outflow in a time window above limit | customer_hot | BLOCK |
@@ -91,7 +92,7 @@ Steps, from narrow to wide. Each step is **latched**: it stays on until a human 
 | Level | Action | Trigger |
 |---|---|---|
 | 1 | Freeze one destination address | e.g. R7 (≥ 5 chains), R8 |
-| 2 | Pause one wallet | Repeated blocks on one wallet |
+| 2 | Pause one wallet | R1, R2, or R3 with sandbox evidence (never an honest large withdrawal) |
 | 3 | Safe mode on one chain | Many signals on one chain |
 | 4 | Global stop | Only with **≥ 2 independent signals** |
 
@@ -167,7 +168,8 @@ backend/.venv/bin/python backend/cli.py reset --address 0x... --actor alice --db
 | (b) treasury, allowlisted, above limit | NEEDS_HUMAN (R4) |
 | (c) treasury, unknown address, above limit | BLOCK (R5) |
 | (d) Binance-style: 5 EIP-7702 authorizations to a sweeper | BLOCK on the slow path (R1, R2, R3 from the probe), wallet paused |
-| (e) Mercado-style: one address, 5 chains, token by token | ALLOW, then DELAY (R7), then BLOCK (R7, R8) and the address is frozen; other customers still ALLOW |
+| (e) Mercado-style: one address, 5 chains, token by token | ALLOW, then DELAY (R7), then BLOCK (R7, R8) and the address is frozen; other customers still ALLOW; the report shows the blast radius (value allowed before the freeze) |
+| (f) honest large withdrawal (40% of the hot wallet) | NEEDS_HUMAN (R3 without sandbox evidence), wallet not paused, next customer ALLOW |
 
 AI: copy `.env.example` to `.env` and set `VULTR_INFERENCE_API_KEY`. Without a key the
 AI is a local mock and every result is marked **[MOCK]**. With a key, a failure never

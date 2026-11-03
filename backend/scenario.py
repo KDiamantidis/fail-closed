@@ -24,6 +24,7 @@ class Expect(BaseModel):
     verdict: str | None = None
     path: str | None = None
     rules: list[str] = Field(default_factory=list)  # must all be present
+    wallet_paused: bool | None = None  # state of the sender's pause after this request
 
 
 class ScenarioRequest(BaseModel):

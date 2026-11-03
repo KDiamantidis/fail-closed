@@ -199,6 +199,12 @@ class History:
                           (authority, since))
         return [(r["chain_id"], r["nonce"]) for r in rows]
 
+    def checks_to(self, destination: str) -> list[dict[str, Any]]:
+        """Value-moving checks to one destination, oldest first (for the blast radius)."""
+        rows = self._rows("SELECT ts, chain_id, asset, amount, verdict FROM checks "
+                          "WHERE destination = ? AND amount != '0' ORDER BY ts, rowid", (destination,))
+        return [{**dict(r), "amount": int(r["amount"])} for r in rows]
+
     def is_frozen(self, address: str) -> dict[str, Any] | None:
         rows = self._rows("SELECT * FROM frozen_destinations WHERE address = ?", (address,))
         return dict(rows[0]) if rows else None

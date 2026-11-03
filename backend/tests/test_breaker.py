@@ -40,6 +40,12 @@ def test_level2_pause_on_r1_r2_r3_block_including_authorities():
     assert all("R1+R2" in a for a in actions)
 
 
+def test_request_level_r3_needs_human_never_pauses():
+    h = History()
+    v = verdict(f("R3", Decision.NEEDS_HUMAN, subject=ATT), decision=Decision.NEEDS_HUMAN)
+    assert Breaker(h).apply(tx(), v, 1.0, "c1") == [] and h.paused() == []
+
+
 def test_other_blocks_do_not_pause():
     h = History()
     Breaker(h).apply(tx(), verdict(f("R5"), f("R6"), f("F1")), 1.0, "c1")

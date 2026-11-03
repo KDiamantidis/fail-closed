@@ -1,7 +1,7 @@
 """Simulation rules. They run on the slow path only, on a usable simulation (R0 is in decide())."""
 
 from app.models import Decision, Finding, WalletType
-from decode import authority_of
+from decode import Kind, authority_of
 from policies.engine import RuleContext, RuleInputMissing
 from policies.fmt import amount, over_pct, pct, short
 
@@ -65,10 +65,11 @@ def _token_transfers(logs: list, wallet: str, known: list[str]) -> list[tuple[st
 
 
 def r3_simulation_outflow(ctx: RuleContext) -> list[Finding]:
-    """Wallet loses more than R3 % of a balance to one non-allowlisted address.
+    """Wallet loses more than R3 % of a balance to one non-allowlisted address -> BLOCK.
 
-    Evidence: native from the state diff, tokens from Transfer logs of KNOWN_TOKENS only,
-    plus the post-delegation probe calls.
+    Only SANDBOX EVIDENCE counts here: outflows the request did not declare (native from
+    the state diff, tokens from Transfer logs of KNOWN_TOKENS only) and funds moved by the
+    post-delegation probe. A large but declared transfer is the request-level R3 (NEEDS_HUMAN).
     """
     ctx.need("simulation", "settings", "state")
     s, sim = ctx.settings, ctx.simulation
@@ -102,6 +103,14 @@ def r3_simulation_outflow(ctx: RuleContext) -> list[Finding]:
                 detail=f"{wallet} -> {to}: {amount(asset, value)} of {amount(asset, base)} "
                        f"({pct(value, base)}). Evidence: {evidence}."))
 
+    # What the request itself declares (judged by the request-level R3, which needs a human).
+    # Sandbox evidence is everything BEYOND that: hidden outflows and the probe.
+    declared_native = {ctx.tx.to: ctx.tx.value} if ctx.tx.value else {}
+    declared_tokens: dict[tuple[str, str], int] = {}
+    d = ctx.decoded
+    if d is not None and d.kind is Kind.ERC20_TRANSFER:
+        declared_tokens[(d.asset, d.destination)] = d.amount
+
     for wallet in _guarded(ctx):
         # native, from the diff of the request itself
         w_before, w_after = _resolved(pre_all.get(wallet, {}), post_all.get(wallet, {}), "balance", "0x0")
@@ -111,12 +120,17 @@ def r3_simulation_outflow(ctx: RuleContext) -> list[Finding]:
                 if addr == wallet:
                     continue
                 b, a = _resolved(pre_all.get(addr, {}), post, "balance", "0x0")
-                gain = _int(a) - _int(b)
+                gain = min(_int(a) - _int(b), loss)
+                if wallet == ctx.tx.from_:
+                    gain -= declared_native.get(addr, 0)
                 if gain > 0:
-                    check(wallet, "native", addr, min(gain, loss), "state diff of the request")
+                    check(wallet, "native", addr, gain, "state diff shows an outflow the request did not declare")
         # tokens, from Transfer logs of known tokens
+        remaining = dict(declared_tokens) if wallet == ctx.tx.from_ else {}
         for token, to, value in _token_transfers((sim.receipt or {}).get("logs"), wallet, s.known_tokens):
-            check(wallet, token, to, value, "Transfer log of the request")
+            covered = min(value, remaining.get((token, to), 0))
+            remaining[(token, to)] = remaining.get((token, to), 0) - covered
+            check(wallet, token, to, value - covered, "Transfer log the request did not declare")
         # post-delegation probe
         for p in sim.probe:
             if p.get("wallet") != wallet:
