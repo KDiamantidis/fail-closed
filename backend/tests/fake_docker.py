@@ -35,6 +35,8 @@ class FakeChain:
         self.drop_set_nonce = False
         self.block_on: str | None = None  # command word that hangs until the container is removed
         self.fail_on: str | None = None  # command word that exits non-zero
+        self.kill_on: str | None = None  # command word at which the container is killed from outside
+        self.trace_raw: str | None = None  # raw (possibly broken) output for debug_traceTransaction
         self.commands: list[list[str]] = []
         self.snapshots = 0
         self.reverts = 0
@@ -61,6 +63,11 @@ class FakeChain:
             return 137, "killed"
         if self.fail_on and self.fail_on in word:
             return 1, "boom"
+        if self.kill_on and self.kill_on in word:
+            removed.set()  # someone killed the container in the middle of the check
+            return 137, "container killed"
+        if self.trace_raw is not None and method == "debug_traceTransaction":
+            return 0, self.trace_raw
         if argv[:2] == ["cast", "block-number"]:
             return 0, "1"
         if argv[0] == "cat":
