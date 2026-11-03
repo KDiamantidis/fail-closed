@@ -27,8 +27,11 @@ class Authorization(BaseModel):
     """One EIP-7702 authorization tuple. Signature fields are optional."""
 
     chain_id: int = Field(ge=0)  # 0 = valid on every chain
-    address: str
+    address: str  # the delegate (code target)
     nonce: int
+    # The account asked to sign this authorization (e.g. the hot wallet). Needed to
+    # simulate an unsigned authorization; with a signature it is recovered instead.
+    authority: str | None = None
     y_parity: int | None = Field(default=None, ge=0, le=1)
     r: str | None = None
     s: str | None = None
@@ -37,6 +40,15 @@ class Authorization(BaseModel):
     @classmethod
     def _address(cls, v: str) -> str:
         return _check_address(v)
+
+    @field_validator("authority")
+    @classmethod
+    def _authority(cls, v: str | None) -> str | None:
+        return None if v is None else _check_address(v)
+
+    @property
+    def signed(self) -> bool:
+        return self.y_parity is not None and self.r is not None and self.s is not None
 
     @field_validator("nonce", mode="before")
     @classmethod

@@ -24,6 +24,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["app", "policies"]
+py-modules = ["state_provider"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
