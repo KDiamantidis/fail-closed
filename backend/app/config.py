@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     mock_llm_escalate_rate: float = 0.0  # share of plain transfers the mock escalates (deterministic)
     # Fast path (Phase 2): the LLM may only ask "escalate to slow path"; LLM error -> slow path.
     fast_path_llm_escalation: bool = True
+    fast_path_llm_timeout_seconds: float = 2.0  # escalation call only; timeout -> slow path
 
     # Sandbox: fresh container per check, always destroyed.
     sandbox_image: str = "fail-closed-sandbox:foundry-v1.8.5"

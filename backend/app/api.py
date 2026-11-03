@@ -98,6 +98,7 @@ def check_payload(res: CheckResult) -> dict[str, Any]:
             "state_diff": sim.state_diff, "probe": sim.probe, "sandbox_limits": sim.sandbox,
         } if sim else None,
         "breaker": res.breaker_actions,
+        "explanation_pending": res.explanation is not None and not res.explanation.done(),
         "timings_ms": {k: round(t * 1000, 1) for k, t in res.timings.items()},
     }
 

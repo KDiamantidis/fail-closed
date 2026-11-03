@@ -21,6 +21,8 @@ Every check records why it took its path. Any unexpected error -> BLOCK (and rec
 import logging
 import time
 import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -49,6 +51,8 @@ class CheckResult:
     llm: LLMAssessment | None = None
     timings: dict[str, float] = field(default_factory=dict)
     breaker_actions: list[str] = field(default_factory=list)
+    explanation: Future | None = None  # slow/early path: the LLM explanation, made in the background
+    _explain_input: tuple | None = None
 
 
 class Guard:
@@ -65,6 +69,9 @@ class Guard:
         self.perf = perf  # monotonic clock for step timings
         self.events = events  # callable(check_id, type, data) for the live stream; never raises out
         self.gate = gate  # SandboxGate: concurrency cap for sandboxes (None = no cap)
+        # Explanations never hold up a verdict: slow/early-path explanations are made here, in the
+        # background, then stored in history and sent as an SSE "explanation" event.
+        self._explain_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="explain")
 
     def emit(self, check_id: str, kind: str, data: dict) -> None:
         if self.events is None:
@@ -107,6 +114,8 @@ class Guard:
             except Exception:  # noqa: BLE001
                 log.exception("breaker failed")
                 result.breaker_actions = ["breaker error (see log)"]
+        if result._explain_input is not None:
+            result.explanation = self._explain_pool.submit(self._explain_later, check_id, *result._explain_input)
         v = result.verdict
         self.emit(check_id, "verdict", {
             "verdict": v.verdict.value, "path": v.path.value if v.path else None, "reasons": v.reasons,
@@ -159,9 +168,10 @@ class Guard:
             for k, v in (sim.timings or {}).items():
                 timings[f"sandbox.{k}"] = v
             self.emit(check_id, "sandbox_done", _sim_summary(sim))
-            llm = self._timed(timings, "llm", self._explain, tx, sim)
+            llm = None  # the verdict does not wait for the explanation
+            result._explain_input = (tx, sim)
         elif path is Path.EARLY:
-            llm = self._timed(timings, "llm", self._explain, tx, None)
+            result._explain_input = (tx, None)
 
         verdict = self._timed(timings, "decide", lambda: decide(
             trace_id=check_id, tx=tx, path=path, simulation=sim,
@@ -219,12 +229,38 @@ class Guard:
         reasons = [f"known-safe shape ({shape}), no request/history findings"]
         if not s.fast_path_llm_escalation:
             return Path.FAST, reasons + ["LLM escalation off"], None
-        llm = self._timed(timings, "llm", self._explain, tx, None)
+        limit = s.fast_path_llm_timeout_seconds
+        t0 = self.perf()
+        future = self._explain_pool.submit(self._explain, tx, None)
+        try:
+            llm = future.result(timeout=limit)
+        except FutureTimeout:
+            timings["llm"] = self.perf() - t0
+            return Path.SLOW, reasons + [f"LLM timeout ({limit:g} s) -> slow path (more checking, never less)"], None
+        timings["llm"] = self.perf() - t0
         if llm is None:
-            return Path.SLOW, reasons + ["LLM error or timeout -> slow path (more checking, never less)"], None
+            return Path.SLOW, reasons + ["LLM error -> slow path (more checking, never less)"], None
         if llm.escalate:
             return Path.SLOW, reasons + ["LLM asked for a deeper check"], llm
         return Path.FAST, reasons + ["LLM: no escalation" + (" (MOCK)" if llm.mock else "")], llm
+
+    def _explain_later(self, check_id: str, tx: TxRequest, sim: SimulationResult | None) -> LLMAssessment | None:
+        """Background: make the explanation, store it, and send the SSE "explanation" event.
+        It never changes the verdict (already decided and recorded)."""
+        t0 = self.perf()
+        llm = self._explain(tx, sim)
+        ms = round((self.perf() - t0) * 1000)
+        if llm is not None:
+            try:
+                self.history.update_llm(check_id, llm.model_dump())
+            except Exception:  # noqa: BLE001
+                log.exception("could not store explanation for %s", check_id)
+        self.emit(check_id, "explanation", {
+            "available": llm is not None, "ms": ms, "model": self.settings.vultr_model,
+            **({"intent_summary": llm.intent_summary, "risk_score": llm.risk_score,
+                "explanation": llm.explanation, "escalate": llm.escalate, "mock": llm.mock} if llm else
+               {"reason": "LLM unavailable: no explanation; the verdict is the same"})})
+        return llm
 
     def _explain(self, tx: TxRequest, sim: SimulationResult | None) -> LLMAssessment | None:
         try:

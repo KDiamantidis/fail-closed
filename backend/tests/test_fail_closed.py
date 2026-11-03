@@ -88,6 +88,16 @@ def test_docker_daemon_not_reachable_blocks(tmp_path):
     assert out["check"]["findings"][-1]["detail"].startswith(("ConnectionError", "ConnectTimeout"))
 
 
+def explanation_event(c, check_id: str) -> dict:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        ev = [e for e in c.get(f"/events?check_id={check_id}").json() if e["type"] == "explanation"]
+        if ev:
+            return ev[0]["data"]
+        time.sleep(0.02)
+    raise AssertionError("no explanation event")
+
+
 class DownLLM:
     """A Vultr client whose every call fails (outage)."""
 
@@ -114,7 +124,13 @@ def test_llm_down_changes_nothing_but_the_explanation(tmp_path, name):
     assert down["check"]["verdict"] == with_llm["check"]["verdict"]
     assert down["signer"]["signed"] == with_llm["signer"]["signed"]
     assert {f["rule_id"] for f in down["check"]["findings"]} == {f["rule_id"] for f in with_llm["check"]["findings"]}
-    assert down["check"]["llm"] is None and with_llm["check"]["llm"] is not None
+    if with_llm["check"]["path"] == "fast":  # fast path: the escalation call is synchronous
+        assert down["check"]["llm"] is None and with_llm["check"]["llm"] is not None
+    else:  # slow path: the explanation comes later as an SSE event
+        ok = explanation_event(c_ok, with_llm["check"]["check_id"])
+        bad = explanation_event(c_down, down["check"]["check_id"])
+        assert ok["available"] is True and bad["available"] is False
+        assert "verdict is the same" in bad["reason"]
     assert svc.guard.explainer.client.calls >= 2  # tried, retried once, then gave up
 
 

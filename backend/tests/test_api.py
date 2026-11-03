@@ -70,9 +70,23 @@ def test_events_cover_every_step_of_a_withdrawal(api):
     c, _ = api
     out = c.post("/withdraw", json=scenario_request("b_treasury_allowlisted_above_limit")).json()
     cid = out["check"]["check_id"]
-    kinds = [e["type"] for e in c.get(f"/events?check_id={cid}").json()]
-    assert kinds == ["received", "decoded", "request_rules", "path", "sandbox_started", "sandbox_done",
-                     "findings", "verdict", "approval", "signer"]
+    kinds = wait_for_event(c, cid, "explanation")
+    # the explanation is made in the background: it can arrive before or after approval/signer
+    assert [k for k in kinds if k != "explanation"] == [
+        "received", "decoded", "request_rules", "path", "sandbox_started", "sandbox_done",
+        "findings", "verdict", "approval", "signer"]
+    assert kinds.index("explanation") > kinds.index("verdict")
+
+
+def wait_for_event(c, check_id: str, kind: str, seconds: float = 5.0) -> list[str]:
+    import time
+
+    deadline = time.monotonic() + seconds
+    while True:
+        kinds = [e["type"] for e in c.get(f"/events?check_id={check_id}").json()]
+        if kind in kinds or time.monotonic() > deadline:
+            return kinds
+        time.sleep(0.02)
 
 
 def test_stream_is_server_sent_events(api):

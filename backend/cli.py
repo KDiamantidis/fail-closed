@@ -385,6 +385,13 @@ def print_check(sc: Scenario, i: int, r: ScenarioRequest, res: CheckResult, guar
 
     p("")
     llm = res.llm
+    waited = None
+    if res.explanation is not None:  # made in the background; the verdict did not wait for it
+        t0 = time.perf_counter()
+        llm = res.explanation.result(timeout=60)
+        waited = (time.perf_counter() - t0) * 1000
+    if waited is not None:
+        p(f"(explanation made asynchronously, after the verdict; it arrived {waited:.0f} ms later)")
     if llm is None:
         p(f"--- LLM ({guard.explainer.mode}) --- no explanation (not called on this path, failed, or off); "
           "the verdict is the same either way")

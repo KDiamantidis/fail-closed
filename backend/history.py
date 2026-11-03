@@ -378,6 +378,11 @@ class History:
         rows = self._rows("SELECT * FROM redteam_reports ORDER BY ts DESC, rowid DESC LIMIT 1", ())
         return {"id": rows[0]["id"], "ts": rows[0]["ts"], **json.loads(rows[0]["report"])} if rows else None
 
+    def update_llm(self, check_id: str, llm: dict[str, Any]) -> None:
+        """Store an explanation that was made after the verdict (async)."""
+        with self.lock, self.conn:
+            self.conn.execute("UPDATE checks SET llm = ? WHERE id = ?", (json.dumps(llm), check_id))
+
     def recent(self, limit: int = 50) -> list[dict[str, Any]]:
         """Newest first."""
         return list(reversed(self.checks()))[:limit]
