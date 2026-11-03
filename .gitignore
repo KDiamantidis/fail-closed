@@ -22,3 +22,7 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Foundry build outputs (compiled inside the image only)
+sandbox/out/
+sandbox/cache/
