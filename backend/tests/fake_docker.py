@@ -37,6 +37,7 @@ class FakeChain:
         self.block_on: str | None = None  # command word that hangs until the container is removed
         self.fail_on: str | None = None  # command word that exits non-zero
         self.kill_on: str | None = None  # command word at which the container is killed from outside
+        self.raise_on: tuple[str, Exception] | None = None  # (command word, exception) raised by exec
         self.trace_raw: str | None = None  # raw (possibly broken) output for debug_traceTransaction
         self.commands: list[list[str]] = []
         self.snapshots = 0
@@ -68,6 +69,8 @@ class FakeChain:
             return 137, "killed"
         if self.fail_on and self.fail_on in word:
             return 1, "boom"
+        if self.raise_on and self.raise_on[0] in word:
+            raise self.raise_on[1]  # a Docker API error at the exec level
         if self.kill_on and self.kill_on in word:
             removed.set()  # someone killed the container in the middle of the check
             return 137, "container killed"
@@ -123,6 +126,8 @@ class FakeChain:
                 return 0, json.dumps(hex(self.block))
             elif method == "anvil_setChainId":
                 self.chain_id = int(p[0])
+            elif method == "eth_chainId":
+                return 0, json.dumps(hex(self.chain_id))
             elif method == "eth_getTransactionReceipt":
                 if p[0] == TX_HASH:
                     return 0, json.dumps(self.receipt)
@@ -150,9 +155,24 @@ class FakeContainer:
     def reload(self):
         pass
 
+    def _http_rpc(self, body: str) -> ExecResult:
+        """Answer a JSON-RPC batch like anvil over HTTP, using the same per-call handler."""
+        items = []
+        for call in json.loads(body):
+            argv = ["cast", "rpc", "-r", "http://127.0.0.1:8545", "--raw", call["method"], json.dumps(call["params"])]
+            code, out = self.chain.handle(argv, self.removed)
+            if code != 0:
+                return ExecResult(code, (b"", out.encode()))
+            items.append(f'{{"jsonrpc":"2.0","id":{call["id"]},"result":{out}}}')  # raw: broken stays broken
+        payload = "[" + ",".join(items) + "]"
+        head = f"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {len(payload)}\r\n\r\n"
+        return ExecResult(0, ((head + payload).encode(), b""))
+
     def exec_run(self, argv, demux=True):
         if self.removed.is_set():
             return ExecResult(137, (b"", b"container removed"))
+        if argv[:2] == ["bash", "-c"] and "/dev/tcp/" in argv[2]:
+            return self._http_rpc(argv[-1])
         if argv[:2] == ["sh", "-c"]:
             outs = []
             for part in argv[2].split(f" && echo {SEP} && "):

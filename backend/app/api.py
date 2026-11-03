@@ -40,6 +40,7 @@ from breaker import Breaker
 from events import EventBus
 from guard import CheckResult, Guard
 from history import History
+from loadtest import run_config
 from redteam import RedTeam
 from holds import HoldError, HoldManager
 from llm import LLMExplainer
@@ -107,6 +108,8 @@ class Services:
         self.breaker = Breaker(history)
         self.holds = HoldManager(guard, approver, signer, publish=self.publish)
         self.redteam_lock = threading.Lock()  # one red-team run at a time
+        self.loadtest_lock = threading.Lock()  # one load demo at a time
+        self.loadtest_runner: Any = None  # override in tests; default: a real SandboxRunner
         self.health_probe: Any = None  # override in tests; default: HTTP GET of our own /health
 
     def make_redteam(self, probe) -> RedTeam:
@@ -299,6 +302,49 @@ def create_app(services: Services | None = None) -> FastAPI:
                 kind, data = await queue.get()
                 yield f"event: {kind}\ndata: {json.dumps(data)}\n\n"
                 if kind in ("redteam_finished", "redteam_error"):
+                    return
+
+        return StreamingResponse(gen(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @app.post("/loadtest/run")
+    async def loadtest_run(normal: int = Query(50, ge=10, le=100), seed: int = Query(7)):
+        """The small load demo for the UI: N normal + 1 hidden attack, on its OWN isolated state
+        (in-memory history and breaker), through the host's sandbox gate. SSE: one event per
+        request, then the summary. Mock LLM numbers are labelled as such."""
+        if not svc.loadtest_lock.acquire(blocking=False):
+            raise HTTPException(status_code=409, detail="a load demo is already running")
+        run_id = "loadtest-" + uuid.uuid4().hex[:8]
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        cfg = {"sandbox_mode": svc.settings.sandbox_mode,
+               "fast_path_llm_escalation": svc.settings.fast_path_llm_escalation}
+
+        def on_result(row: dict) -> None:
+            svc.bus.publish("-", "loadtest_request", row, run_id=run_id)
+            loop.call_soon_threadsafe(queue.put_nowait, ("loadtest_request", row))
+
+        def work() -> None:
+            try:
+                r = run_config("api-demo", cfg, svc.settings, n_normal=normal, seed=seed,
+                               on_result=on_result, gate=svc.guard.gate, runner=svc.loadtest_runner)
+                r["run_id"] = run_id
+                svc.bus.publish("-", "loadtest_finished", r, run_id=run_id)
+                loop.call_soon_threadsafe(queue.put_nowait, ("loadtest_finished", r))
+            except Exception as e:  # noqa: BLE001
+                log.exception("load demo failed")
+                loop.call_soon_threadsafe(queue.put_nowait, ("loadtest_error", {"error": f"{type(e).__name__}: {e}"}))
+            finally:
+                svc.loadtest_lock.release()
+
+        threading.Thread(target=work, name=run_id, daemon=True).start()
+
+        async def gen():
+            yield f"event: loadtest_started\ndata: {json.dumps({'run_id': run_id, 'normal': normal, 'attacks': 1, 'config': cfg, 'llm': 'mock'})}\n\n"
+            while True:
+                kind, data = await queue.get()
+                yield f"event: {kind}\ndata: {json.dumps(data)}\n\n"
+                if kind in ("loadtest_finished", "loadtest_error"):
                     return
 
         return StreamingResponse(gen(), media_type="text/event-stream",

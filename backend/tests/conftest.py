@@ -6,6 +6,7 @@ from app.config import Settings
 
 # Tests never read the developer's real .env (it may hold the API key or a different model).
 Settings.model_config["env_file"] = None
+os.environ["MOCK_LLM_LATENCY_MS"] = "0"  # tests do not wait for the simulated model latency
 for _name in list(os.environ):
     if _name.startswith(("VULTR_", "LLM_", "SANDBOX_", "FAST_PATH_")):
         del os.environ[_name]

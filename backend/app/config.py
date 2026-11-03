@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     llm_mode: str = "auto"  # auto | mock | live
     llm_timeout_seconds: float = 15.0
     llm_max_retries: int = 1
+    # Mock only (no Vultr key yet): make the numbers realistic and say so in every result.
+    mock_llm_latency_ms: int = 800  # each mock call sleeps this long, like a real model call
+    mock_llm_escalate_rate: float = 0.0  # share of plain transfers the mock escalates (deterministic)
     # Fast path (Phase 2): the LLM may only ask "escalate to slow path"; LLM error -> slow path.
     fast_path_llm_escalation: bool = True
 

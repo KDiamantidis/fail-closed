@@ -83,11 +83,32 @@ _ZERO_FEES = ["--gas-price", "0", "--priority-gas-price", "0"]
 class SandboxError(Exception):
     """The sandbox could not produce a trustworthy result. Always means R0 / BLOCK."""
 
+    def __init__(self, message: str, transient: bool = False):
+        super().__init__(message)
+        self.transient = transient  # a Docker API hiccup, not something the request caused
 
-def anvil_args(chain_id: int) -> list[str]:
+
+# Docker API errors that say nothing about the request (seen on Docker Desktop: an exec
+# record disappears between start and inspect). Only these may be retried, in a NEW container.
+_TRANSIENT_MARKERS = ("No such exec instance", "Connection aborted", "connection reset", "Read timed out")
+
+
+def _is_transient(e: Exception) -> bool:
+    text = f"{type(e).__name__}: {e}"
+    return type(e).__name__ in ("NotFound", "APIError", "ConnectionError") and any(
+        m.lower() in text.lower() for m in _TRANSIENT_MARKERS)
+
+
+# Anvil always starts on its neutral dev chain id; the request's chain is set with
+# anvil_setChainId and read back. Starting with --chain-id 10 makes anvil load the Optimism
+# network config, which refuses --hardfork prague and exits ("conflicts with network config").
+NEUTRAL_CHAIN_ID = 31337
+
+
+def anvil_args() -> list[str]:
     return [
         "--hardfork", "prague",
-        "--chain-id", str(chain_id),
+        "--chain-id", str(NEUTRAL_CHAIN_ID),
         "--host", "127.0.0.1",
         "--port", "8545",
         "--auto-impersonate",
@@ -205,6 +226,18 @@ def _rpc(method: str, params: list[Any]) -> list[str]:
     return ["cast", "rpc", "-r", RPC, "--raw", method, json.dumps(params)]
 
 
+def _is_rpc(cmd: list[str]) -> bool:
+    return len(cmd) == 7 and cmd[:2] == ["cast", "rpc"] and cmd[4] == "--raw"
+
+
+# One HTTP POST from inside the container (bash /dev/tcp; no curl in the image). The body is
+# passed as an argument (no shell interpolation) and stays under the 128 KiB argument limit.
+_RPC_SCRIPT = ('exec 3<>/dev/tcp/127.0.0.1/8545 || exit 7; '
+               'printf "POST / HTTP/1.1\\r\\nHost: sandbox\\r\\nContent-Type: application/json\\r\\n'
+               'Content-Length: %d\\r\\nConnection: close\\r\\n\\r\\n%s" "${#1}" "$1" >&3; cat <&3')
+RPC_BODY_LIMIT = 100_000
+
+
 def _hex32(v: str) -> str:
     return "0x" + v[2:].rjust(64, "0")
 
@@ -279,7 +312,7 @@ class WarmPool:
         return lease.uses >= self.max_uses or self.clock() - lease.born >= self.max_age
 
     def new(self) -> _Lease:
-        container, limits = self.runner._start_container(anvil_args(31337), f"fc-warm-{uuid.uuid4().hex[:12]}")
+        container, limits = self.runner._start_container(anvil_args(), f"fc-warm-{uuid.uuid4().hex[:12]}")
         try:
             baseline, block = self.runner._read_baseline(container)
         except Exception:
@@ -365,6 +398,11 @@ class SandboxRunner:
         self._client = client
         self.clock = clock
         self.started = 0  # containers started by this runner (fresh checks, pool, warm-up)
+        self.retries = 0  # whole-check retries after a transient Docker API error
+        # Pure lookups, safe to reuse across checks: the image's artifacts never change, and a
+        # balanceOf slot is keccak(holder, 0), a pure function of the holder address.
+        self._artifacts: dict[str, str] = {}
+        self._slots: dict[str, str] = {}
         self._started_lock = threading.Lock()
         self.pool: WarmPool | None = None
         if settings.sandbox_mode == "warm":
@@ -387,21 +425,42 @@ class SandboxRunner:
         """Simulate `tx` on `state`. Returns an ok result or raises SandboxError.
 
         `force_mode="effect"` simulates a delegation by its effect even for test accounts
-        (used to prove both modes agree)."""
+        (used to prove both modes agree).
+
+        A transient Docker API error (not the request's fault) gets ONE retry of the whole
+        check in a new container, inside the same overall deadline. Content problems (empty
+        diff, missing receipt, mismatches, timeouts) are never retried: they are R0."""
+        deadline = time.monotonic() + self.settings.sandbox_timeout_seconds
+        try:
+            return self._run_once(tx, state, force_mode, self.settings.sandbox_timeout_seconds)
+        except SandboxError as e:
+            left = deadline - time.monotonic()
+            if not e.transient or left < 1.0:
+                raise
+            log.warning("transient Docker error, retrying the check once in a new container: %s", e)
+            with self._started_lock:
+                self.retries += 1
+            result = self._run_once(tx, state, force_mode, left)
+            result.timings["retries"] = 1.0
+            result.sandbox = {**result.sandbox, "retried_after": str(e)[:160]}
+            return result
+
+    def _run_once(self, tx: TxRequest, state: StartingState, force_mode: str | None,
+                  timeout: float) -> SimulationResult:
         run = _Run(name=f"fc-sandbox-{uuid.uuid4().hex[:12]}")
         pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sandbox")
-        timeout = self.settings.sandbox_timeout_seconds
         try:
             future = pool.submit(self._run, run, tx, state, force_mode)
             try:
                 result = future.result(timeout=timeout)
                 run.ok = True
             except FutureTimeout:
-                raise SandboxError(f"timeout after {timeout:g}s") from None
+                raise SandboxError(f"timeout after {self.settings.sandbox_timeout_seconds:g}s") from None
             except SandboxError:
                 raise
             except Exception as e:  # docker errors, JSON errors, ...: all fail closed
-                raise SandboxError(f"{type(e).__name__}: {e}") from e
+                raise SandboxError(f"{type(e).__name__}: {e}{self._diagnose(run)}",
+                                   transient=_is_transient(e)) from e
         finally:
             t0 = self.clock()
             if run.lease is not None and run.ok and run.reverted:
@@ -427,7 +486,7 @@ class SandboxRunner:
         t0 = self.clock()
         c = None
         try:
-            c = self.client.containers.run(self.settings.sandbox_image, command=anvil_args(1),
+            c = self.client.containers.run(self.settings.sandbox_image, command=anvil_args(),
                                            name=f"fc-warmup-{uuid.uuid4().hex[:8]}", **container_options(self.settings))
             self._count_start()
             self._wait_ready(c)
@@ -457,13 +516,12 @@ class SandboxRunner:
                 self.pool.discard(lease)
                 raise SandboxError("cancelled")
             container, run.limits = lease.container, lease.limits
-            self._exec(container, _rpc("anvil_setChainId", [tx.chain_id]), "set chain id")
-            snapshot = json.loads(self._exec(container, _rpc("evm_snapshot", []), "snapshot"))
+            snapshot = self._set_chain(container, tx.chain_id, snapshot=True)
             run.timings["pool_acquire" if reused else "container_start"] = t() - t0
         else:
             container = self.client.containers.run(
                 self.settings.sandbox_image,
-                command=anvil_args(tx.chain_id),
+                command=anvil_args(),
                 name=run.name,
                 **container_options(self.settings),
             )
@@ -477,6 +535,7 @@ class SandboxRunner:
             container.reload()
             run.limits = applied_limits(container.attrs)
             self._wait_ready(container)
+            self._set_chain(container, tx.chain_id)
             run.timings["container_start"] = t() - t0
 
         t0 = t()
@@ -524,6 +583,39 @@ class SandboxRunner:
             delegation_mode=mode, probe=probe,
         )
 
+    def _set_chain(self, c: Any, chain_id: int, snapshot: bool = False) -> Any:
+        """Set the request's chain id and read it back (content, not exit codes); optionally
+        take the warm-mode snapshot in the same batch. Returns the snapshot id."""
+        cmds = [_rpc("anvil_setChainId", [chain_id]), _rpc("eth_chainId", [])]
+        if snapshot:
+            cmds.append(_rpc("evm_snapshot", []))
+        out = self._batch(c, cmds, "set chain id")
+        got = json.loads(out[1])
+        if not isinstance(got, str) or int(got, 16) != chain_id:
+            raise SandboxError(f"chain id read-back {got} != {chain_id}")
+        if snapshot:
+            snap = json.loads(out[2])
+            if not isinstance(snap, str):
+                raise SandboxError("evm_snapshot returned no id")
+            return snap
+        return None
+
+    def _diagnose(self, run: _Run) -> str:
+        """Why did the container stop? Docker state + last log line, attached to the R0 reason."""
+        c = run.container
+        if c is None:
+            return ""
+        try:
+            c.reload()
+            st = c.attrs.get("State", {}) or {}
+            if st.get("Status") == "running":
+                return ""
+            tail = c.logs(tail=3).decode(errors="replace").strip().splitlines()
+            return (f" [container {st.get('Status')}, exit {st.get('ExitCode')}, oom {st.get('OOMKilled')}"
+                    f"{', last log: ' + tail[-1][:160] if tail else ''}]")
+        except Exception:  # noqa: BLE001
+            return ""
+
     def _count_start(self) -> None:
         with self._started_lock:
             self.started += 1
@@ -544,25 +636,26 @@ class SandboxRunner:
 
     def _read_baseline(self, c: Any) -> tuple[dict[str, tuple[int, int, str]], int]:
         """The clean state of a new warm container: the known (dev) accounts and the block number."""
-        values = self._read_accounts(c, ANVIL_ACCOUNTS)
-        block = _int(json.loads(self._exec(c, _rpc("eth_blockNumber", []), "block number")))
-        return values, block
+        return self._read_accounts(c, ANVIL_ACCOUNTS, with_block=True)
 
-    def _read_accounts(self, c: Any, accounts: list[str]) -> dict[str, tuple[int, int, str]]:
+    def _read_accounts(self, c: Any, accounts: list[str], with_block: bool = False):
+        """One batch: balance, nonce, code of each account (and the block number)."""
         cmds = []
         for a in accounts:
             cmds += [_rpc("eth_getBalance", [a, "latest"]), _rpc("eth_getTransactionCount", [a, "latest"]),
                      _rpc("eth_getCode", [a, "latest"])]
+        if with_block:
+            cmds.append(_rpc("eth_blockNumber", []))
         out = [json.loads(o) for o in self._batch(c, cmds, "read accounts")]
-        return {a: (_int(out[3 * i]), _int(out[3 * i + 1]), str(out[3 * i + 2] or "0x").lower())
-                for i, a in enumerate(accounts)}
+        values = {a: (_int(out[3 * i]), _int(out[3 * i + 1]), str(out[3 * i + 2] or "0x").lower())
+                  for i, a in enumerate(accounts)}
+        return (values, _int(out[-1])) if with_block else values
 
     def _is_clean(self, lease: _Lease) -> tuple[bool, str]:
         """Read back the known accounts and every account the last check touched."""
         try:
             accounts = sorted(set(lease.baseline) | lease.touched)
-            now = self._read_accounts(lease.container, accounts)
-            block = _int(json.loads(self._exec(lease.container, _rpc("eth_blockNumber", []), "block number")))
+            now, block = self._read_accounts(lease.container, accounts, with_block=True)
         except Exception as e:  # noqa: BLE001 - cannot prove it is clean -> not clean
             return False, f"read-back failed: {e}"
         if block != lease.baseline_block:
@@ -590,21 +683,26 @@ class SandboxRunner:
         }
         code_of: dict[str, str] = {}
         for name in sorted(artifacts):  # names are validated [A-Za-z0-9_]+
-            code = self._exec(c, ["cat", f"{ARTIFACT_DIR}/{name}.hex"], f"read artifact {name}").strip()
-            if not re.fullmatch(r"0x([0-9a-f]{2})+", code):
-                raise SandboxError(f"artifact {name} is empty or invalid")
+            code = self._artifacts.get(name)
+            if code is None:
+                code = self._exec(c, ["cat", f"{ARTIFACT_DIR}/{name}.hex"], f"read artifact {name}").strip()
+                if not re.fullmatch(r"0x([0-9a-f]{2})+", code):
+                    raise SandboxError(f"artifact {name} is empty or invalid")
+                self._artifacts[name] = code
             code_of[f"artifact:{name}"] = code
 
         # balanceOf slots for token balances (MockToken layout), computed in the sandbox
         holdings = [(holder, token, amt) for holder, s in state.accounts.items()
                     for token, amt in s.token_balances.items()]
-        slots: list[str] = []
-        if holdings:
-            slots = self._batch(c, [["cast", "index", "address", h, str(TOKEN_BALANCE_SLOT)]
-                                    for h, _, _ in holdings], "token balance slots")
-            for s in slots:
+        missing = sorted({h for h, _, _ in holdings} - set(self._slots))
+        if missing:
+            computed = self._batch(c, [["cast", "index", "address", h, str(TOKEN_BALANCE_SLOT)]
+                                       for h in missing], "token balance slots")
+            for h, s in zip(missing, computed, strict=True):
                 if not re.fullmatch(r"0x[0-9a-f]{64}", s):
                     raise SandboxError("cast index returned an invalid slot")
+                self._slots[h] = s
+        slots = [self._slots[h] for h, _, _ in holdings]
 
         cmds: list[list[str]] = []
         expect: list[tuple[list[str], str]] = []
@@ -814,6 +912,11 @@ class SandboxRunner:
     # ---- docker helpers -----------------------------------------------------
 
     def _exec(self, c: Any, argv: list[str], what: str) -> str:
+        if _is_rpc(argv):  # a single RPC also goes over HTTP (one process, no cast start-up)
+            return self._http_rpc(c, [argv], what)[0]
+        return self._raw_exec(c, argv, what)
+
+    def _raw_exec(self, c: Any, argv: list[str], what: str) -> str:
         res = c.exec_run(argv, demux=True)
         out, err = res.output if isinstance(res.output, tuple) else (res.output, b"")
         if res.exit_code != 0:
@@ -821,10 +924,56 @@ class SandboxRunner:
             raise SandboxError(f"{what} failed (exit {res.exit_code}): {msg}")
         return (out or b"").decode(errors="replace")
 
+    def _http_rpc(self, c: Any, cmds: list[list[str]], what: str) -> list[str]:
+        """Send `cast rpc` calls as JSON-RPC batches over ONE HTTP request each (bash /dev/tcp
+        to anvil inside the container): ~15 ms instead of ~60 ms per cast process. Results are
+        returned as JSON text, exactly like `cast rpc --raw` prints them. Any JSON-RPC error,
+        a missing answer, a non-200 response or unparseable JSON fails the step."""
+        out: list[str] = []
+        chunk: list[list[str]] = []
+        size = 0
+        for cmd in cmds + [None]:  # type: ignore[list-item]
+            item_len = len(cmd[6]) + 80 if cmd is not None else 0
+            if cmd is None or (chunk and size + item_len > RPC_BODY_LIMIT):
+                if chunk:
+                    out += self._http_rpc_chunk(c, chunk, what)
+                chunk, size = [], 0
+            if cmd is not None:
+                chunk.append(cmd)
+                size += item_len
+        return out
+
+    def _http_rpc_chunk(self, c: Any, cmds: list[list[str]], what: str) -> list[str]:
+        calls = [{"jsonrpc": "2.0", "id": i, "method": cmd[5], "params": json.loads(cmd[6])}
+                 for i, cmd in enumerate(cmds)]
+        body = json.dumps(calls, separators=(",", ":"))  # ASCII only, so ${#1} counts bytes
+        raw = self._raw_exec(c, ["bash", "-c", _RPC_SCRIPT, "rpc", body], what)
+        head, sep, payload = raw.partition("\r\n\r\n")
+        if not sep or not head.startswith("HTTP/1.1 200"):
+            raise SandboxError(f"{what}: bad response from anvil: {head[:80]!r}")
+        m = re.search(r"content-length:\s*(\d+)", head, re.I)
+        if m:
+            payload = payload[:int(m.group(1))]
+        data = json.loads(payload)
+        if not isinstance(data, list) or len(data) != len(cmds):
+            raise SandboxError(f"{what}: expected {len(cmds)} answers, got {len(data) if isinstance(data, list) else '?'}")
+        by_id = {d.get("id"): d for d in data if isinstance(d, dict)}
+        out = []
+        for i, cmd in enumerate(cmds):
+            d = by_id.get(i)
+            if d is None or "error" in d or "result" not in d:
+                err = d.get("error") if d else "no answer"
+                raise SandboxError(f"{what} failed: {cmd[5]}: {str(err)[:200]}")
+            out.append(json.dumps(d["result"]))
+        return out
+
     def _batch(self, c: Any, cmds: list[list[str]], what: str) -> list[str]:
-        """Run several commands in one exec; stop at the first failure."""
+        """Run several commands in one exec; stop at the first failure.
+        If all of them are RPC calls, they go to anvil as JSON-RPC batches over HTTP."""
         if not cmds:
             return []
+        if all(_is_rpc(cmd) for cmd in cmds):
+            return self._http_rpc(c, cmds, what)
         script = f" && echo {SEP} && ".join(shlex.join(cmd) for cmd in cmds)
         parts = self._exec(c, ["sh", "-c", script], what).split(SEP)
         if len(parts) != len(cmds):

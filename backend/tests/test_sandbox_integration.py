@@ -98,3 +98,14 @@ def test_mock_token_transfer_emits_transfer_log():
     assert res.receipt["status"] == "0x1"
     [log] = res.receipt["logs"]
     assert log["topics"][0] == TRANSFER_TOPIC and int(log["data"], 16) == 7 * ETH
+
+
+@pytest.mark.parametrize("chain_id", [1, 10, 56, 137, 8453, 42161, 43114])
+def test_every_common_chain_id_works(chain_id):
+    """Regression: anvil --chain-id 10 loads the Optimism config and exits with --hardfork prague.
+    The runner starts on the neutral chain id and sets the real one via RPC."""
+    sender = ANVIL_ACCOUNTS[0]
+    state = StartingState.model_validate({"accounts": {sender: {"balance": 2 * ETH}}})
+    req = TxRequest.model_validate(tx(**{"from": sender, "to": BOB, "value": ETH, "chain_id": chain_id}))
+    res = SandboxRunner(Settings()).run(req, state)
+    assert res.ok and int(res.tx["chainId"], 16) == chain_id

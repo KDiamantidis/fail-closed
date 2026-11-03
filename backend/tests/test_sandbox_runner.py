@@ -314,6 +314,58 @@ def test_no_probe_without_delegation():
     assert res.probe == [] and res.delegation_mode is None
 
 
+# --- transient Docker errors: one retry in a NEW container ------------------------------
+
+class NotFound(Exception):  # same name as docker.errors.NotFound
+    pass
+
+
+def test_transient_docker_error_is_retried_once_in_a_new_container():
+    calls = {"n": 0}
+
+    def flaky():
+        c = FakeChain()
+        calls["n"] += 1
+        if calls["n"] == 1:
+            c.raise_on = ("debug_traceTransaction", NotFound('404: No such exec instance: abc123'))
+        return c
+
+    d = FakeDocker(chain_factory=flaky)
+    r = runner(d)
+    res = r.run(attack_tx(), STATE)
+    assert res.ok and r.retries == 1 and res.timings["retries"] == 1.0
+    assert "No such exec instance" in res.sandbox["retried_after"]
+    assert len(d.containers.created) == 2 and all(c.removed.is_set() for c in d.containers.created)
+
+
+def test_transient_error_twice_is_r0():
+    def always():
+        c = FakeChain()
+        c.raise_on = ("debug_traceTransaction", NotFound("No such exec instance"))
+        return c
+
+    with pytest.raises(SandboxError, match="No such exec instance"):
+        runner(FakeDocker(chain_factory=always)).run(attack_tx(), STATE)
+
+
+@pytest.mark.parametrize("fault", [{"diff": {"pre": {}, "post": {}}}, {"fail_on": "cast send"},
+                                   {"raise_on": ("debug_traceTransaction", ValueError("bad"))}])
+def test_content_and_other_errors_are_never_retried(fault):
+    made = []
+
+    def factory():
+        c = FakeChain()
+        for k, v in fault.items():
+            setattr(c, k, v)
+        made.append(c)
+        return c
+
+    r = runner(FakeDocker(chain_factory=factory))
+    with pytest.raises(SandboxError):
+        r.run(attack_tx(), STATE)
+    assert r.retries == 0 and len(made) == 1
+
+
 # --- fees and token balances ----------------------------------------------------------
 
 def test_zero_fees_everywhere():

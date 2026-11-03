@@ -12,6 +12,7 @@ when there is no key (LLM_MODE=auto) or when LLM_MODE=mock, and is always marked
 import json
 import logging
 import re
+import time
 from typing import Any
 
 from pydantic import ValidationError
@@ -92,7 +93,16 @@ def parse_assessment(text: str | None) -> LLMAssessment:
         raise ValueError(f"invalid assessment: {e.error_count()} field error(s)") from None
 
 
-def mock_assessment(tx: TxRequest, sim: SimulationResult | None) -> LLMAssessment:
+def _mock_escalates(tx: TxRequest, rate: float) -> bool:
+    """Deterministic: the same request always gets the same answer (reproducible load tests)."""
+    if rate <= 0:
+        return False
+    from approval import request_hash
+
+    return int(request_hash(tx)[2:10], 16) / 2**32 < rate
+
+
+def mock_assessment(tx: TxRequest, sim: SimulationResult | None, escalate_rate: float = 0.0) -> LLMAssessment:
     """Deterministic stand-in for development without an API key. Always marked MOCK."""
     post = ((sim.state_diff or {}).get("post") or {}) if sim and sim.ok else {}
     delegated = {
@@ -110,7 +120,7 @@ def mock_assessment(tx: TxRequest, sim: SimulationResult | None) -> LLMAssessmen
         risk, escalate = 70, True
     else:
         summary = f"{MOCK_TAG} Transfer of {tx.value} wei from {tx.from_} to {tx.to}."
-        risk, escalate = 10, False
+        risk, escalate = 10, _mock_escalates(tx, escalate_rate)
     return LLMAssessment(
         intent_summary=summary,
         risk_score=risk,
@@ -154,7 +164,9 @@ class LLMExplainer:
     def assess(self, tx: TxRequest, sim: SimulationResult | None) -> LLMAssessment | None:
         mode = self.mode
         if mode == "mock":
-            return mock_assessment(tx, sim)
+            if self.settings.mock_llm_latency_ms > 0:
+                time.sleep(self.settings.mock_llm_latency_ms / 1000)
+            return mock_assessment(tx, sim, self.settings.mock_llm_escalate_rate)
         if mode == "off":
             log.warning("LLM off (mode=%s, key set=%s): no explanation", self.settings.llm_mode,
                         bool(self.settings.vultr_inference_api_key))

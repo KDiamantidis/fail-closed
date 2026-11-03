@@ -74,9 +74,10 @@ class Guard:
         except Exception:  # noqa: BLE001 - the stream must never affect a verdict
             log.exception("event emit failed")
 
-    def check(self, tx: TxRequest) -> CheckResult:
+    def check(self, tx: TxRequest, now: float | None = None) -> CheckResult:
+        """`now`: the request's time for the history windows (default: the Guard clock)."""
         check_id = uuid.uuid4().hex
-        now = self.clock()
+        now = self.clock() if now is None else now
         t_start = self.perf()
         timings: dict[str, float] = {}
         result = CheckResult(check_id=check_id, verdict=block(check_id, "not evaluated"), decoded=None)

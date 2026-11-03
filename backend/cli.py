@@ -422,6 +422,21 @@ def cmd_redteam(health_url: str | None) -> int:
     return 0 if report["all_contained"] else 1
 
 
+def cmd_loadtest(args) -> int:
+    from loadtest import CONFIGS, markdown_table, machine_info, run_all
+
+    base = Settings(**{**get_settings().model_dump(), "mock_llm_latency_ms": args.latency_ms,
+                       "mock_llm_escalate_rate": args.escalate_rate})
+    configs = list(CONFIGS) if args.configs == "all" else args.configs.split(",")
+    print(f"Fail Closed | load test {args.normal} normal + 1 attack | configs: {', '.join(configs)} | "
+          f"MOCK LLM {args.latency_ms} ms, escalates {args.escalate_rate:.0%}")
+    results = run_all(base, Path(args.out), args.normal, args.seed, args.concurrency, configs)
+    print("")
+    print(markdown_table(results, machine_info()))
+    print(f"saved to {args.out}/")
+    return 0 if all(r["attacks_stopped"] == r["attacks"] for r in results) else 1
+
+
 def cmd_reset(db: str, address: str | None, wallet: str | None, actor: str) -> int:
     h = History(db)
     b = Breaker(h)
@@ -459,7 +474,17 @@ def main(argv: list[str] | None = None) -> int:
     br.add_argument("--db", default=None)
     rt = sub.add_parser("redteam", help="run hostile payloads in the real sandbox; RED if any escapes")
     rt.add_argument("--health-url", default=None, help="API /health to call during the fork/memory bombs")
+    lt = sub.add_parser("loadtest", help="500 normal + 1 attack through the real Guard, 4 configs")
+    lt.add_argument("--normal", type=int, default=500)
+    lt.add_argument("--seed", type=int, default=7)
+    lt.add_argument("--concurrency", type=int, default=8)
+    lt.add_argument("--configs", default="all", help="all, or e.g. fresh/escalation-on,warm/escalation-off")
+    lt.add_argument("--latency-ms", type=int, default=800, help="mock LLM latency per call")
+    lt.add_argument("--escalate-rate", type=float, default=0.05, help="share of plain transfers the mock escalates")
+    lt.add_argument("--out", default=str(REPO / "docs" / "results"))
     args = ap.parse_args(argv)
+    if args.cmd == "loadtest":
+        return cmd_loadtest(args)
     if args.cmd == "redteam":
         return cmd_redteam(args.health_url)
 
