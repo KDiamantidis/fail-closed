@@ -24,7 +24,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["app", "policies"]
-py-modules = ["state_provider", "sandbox_runner", "llm", "cli"]
+py-modules = ["state_provider", "sandbox_runner", "llm", "cli", "decode"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
