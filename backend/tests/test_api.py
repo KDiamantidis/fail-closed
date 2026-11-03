@@ -23,18 +23,18 @@ def test_health_and_public_key(api):
     assert pk["public_key"] == svc.approver.public_key_hex and pk["algorithm"] == "ed25519"
 
 
-def test_check_allow_includes_approval_and_details(api):
+def test_check_is_a_dry_run_without_approval_even_on_allow(api):
     c, _ = api
     r = c.post("/check", json=scenario_request("a_customer_small_withdrawal")).json()
-    assert r["verdict"] == "ALLOW" and r["path"] == "fast"
-    assert r["approval"]["verdict"] == "ALLOW" and r["approval"]["signature"]
+    assert r["verdict"] == "ALLOW" and r["path"] == "fast" and r["dry_run"] is True
+    assert "approval" not in r and "signature" not in str(r)
     assert r["path_reasons"] and "total" in r["timings_ms"] and r["llm"]["mock"] is True
 
 
 def test_check_non_allow_has_no_approval(api):
     c, _ = api
     r = c.post("/check", json=scenario_request("c_treasury_unknown_above_limit")).json()
-    assert r["verdict"] == "BLOCK" and r["approval"] is None
+    assert r["verdict"] == "BLOCK" and "approval" not in r
 
 
 @pytest.mark.parametrize(

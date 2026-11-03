@@ -1,6 +1,6 @@
 """Fail Closed HTTP API. Runs on the host (uvicorn), never in a container.
 
-    POST /check                 verdict + findings + path + timings + LLM (+ approval if ALLOW)
+    POST /check                 dry run: verdict + findings + path + timings + LLM, NEVER an approval
     POST /withdraw              demo flow: Guard check -> approval -> mock signer
     GET  /history?limit=        newest first
     GET  /breaker               frozen destinations + paused wallets
@@ -136,9 +136,8 @@ def create_app(services: Services | None = None) -> FastAPI:
 
     @app.post("/check")
     def check(tx: TxRequest) -> dict:
-        res = svc.guard.check(tx)
-        approval = svc.approver.issue(tx, res.verdict)
-        return {**check_payload(res), "approval": approval.model_dump() if approval else None}
+        """Dry run: the verdict and why. NEVER an approval (approvals only via /withdraw)."""
+        return {**check_payload(svc.guard.check(tx)), "dry_run": True}
 
     @app.post("/withdraw")
     def withdraw(tx: TxRequest) -> dict:

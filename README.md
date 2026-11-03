@@ -208,7 +208,7 @@ curl -N localhost:8000/stream                                 # live events (SSE
 
 | Endpoint | What |
 |---|---|
-| `POST /check` | Check a request: verdict, findings, path + reasons, timings, AI result; approval if ALLOW. Bad input or missing `wallet_type`: 422 |
+| `POST /check` | Dry run: verdict, findings, path + reasons, timings, AI result. **Never** an approval (only `/withdraw` can lead to a signature). Bad input or missing `wallet_type`: 422 |
 | `POST /withdraw` | Demo flow: withdrawal service → Guard → approval → mock signer; returns signed or refused with the reason |
 | `GET /history?limit=50` | Past checks, newest first |
 | `GET /breaker` | Frozen destinations, paused wallets, breaker events |

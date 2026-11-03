@@ -6,7 +6,6 @@ Each flow runs twice: with a fake sandbox (always), and with the real Docker san
 import pytest
 
 from app.models import TxRequest
-from approval import Approval
 from tests.api_helpers import ADMIN, SCENARIOS, FakeRunner, client, scenario_request
 
 pytestmark = pytest.mark.skipif(not SCENARIOS.exists(), reason="scenarios/ not available")
@@ -79,8 +78,8 @@ def test_reset_without_admin_token_is_refused_and_with_it_unpauses(api):
 def test_approval_cannot_be_reused_or_moved_to_another_request(tmp_path):
     c, svc = client(tmp_path, runner=FakeRunner())
     body = scenario_request("a_customer_small_withdrawal")
-    ap = Approval(**c.post("/check", json=body).json()["approval"])
     tx = TxRequest.model_validate(body)
+    ap = svc.approver.issue(tx, svc.guard.check(tx).verdict)  # what /withdraw would get
     tampered = TxRequest.model_validate({**body, "to": "0xbad0000000000000000000000000000000000e01"})
     assert "does not match" in svc.signer.sign(tampered, ap).reason
     assert svc.signer.sign(tx, ap).signed is True
