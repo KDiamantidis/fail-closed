@@ -68,6 +68,7 @@ class Settings(BaseSettings):
 
     # Rule thresholds: starting values, tune later.
     delay_minutes: int = 15
+    delay_check_seconds: float = 5.0  # how often the DELAY worker looks for due holds
     r2_window_hours: int = 24
     r3_max_single_dest_pct: float = 25.0
     r4_treasury_limit_wei: int = 10 * 10**18

@@ -19,7 +19,12 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from app.config import Settings, get_settings
+from approval import Approver, GuardKey
+from holds import HoldManager
+from signer_mock import MockSigner
 from app.models import Decision
 from breaker import Breaker
 from guard import CheckResult, Guard
@@ -161,17 +166,48 @@ def blast_radius(history: History, sc: Scenario) -> list[str]:
     return lines
 
 
+def run_delay_worker(sc: Scenario, guard: Guard, results: list, base_t: float) -> tuple[list, list[str]]:
+    """Run the DELAY worker once, DELAY_MINUTES after the scenario's last request, and check
+    each `after_hold` expectation. Uses a throwaway approval key: this is a local CLI run."""
+    if not any(res.verdict.verdict is Decision.DELAY for _, res, _ in results):
+        return results, []
+    later = base_t + max(r.t for r in sc.requests) + guard.settings.delay_minutes * 60 + 1
+    key = GuardKey(Ed25519PrivateKey.generate())
+    holds = HoldManager(guard, Approver(key, guard.settings.approval_ttl_seconds, clock=lambda: later),
+                        MockSigner(key.public_key_hex, clock=lambda: later))
+    outcome = {d["id"]: d for d in holds.release_due(now=later)}
+    lines = [f"DELAY worker for {sc.name}, at +{guard.settings.delay_minutes} min after the last request:"]
+    checked = []
+    for r, res, status in results:
+        d = outcome.get(res.check_id)
+        if d is not None:
+            idx = sc.requests.index(r) + 1
+            lines.append(f"  #{idx} {r.label}: {d['status'].upper()}, signed={d['signed']}")
+            lines.append(f"       {d['reason']}")
+        want = r.expect.after_hold
+        if want is not None:
+            got = d["status"] if d else "not held"
+            if got != want and status == "OK":
+                status = f"MISMATCH: after hold {got} != {want}"
+        checked.append((r, res, status))
+    return checked, lines
+
+
 def cmd_run_all(directory: Path, db: str) -> int:
     base = get_settings()
     history = fresh_history(db)
     clock = {"now": T0}
     rows = []
     radius: list[str] = []
+    worker: list[str] = []
     files = discover(directory)
     for n, path in enumerate(files):
         sc = load(path)
         guard = make_guard(sc, base, history, clock)
-        for r, res, status in run_file(sc, guard, clock, T0 + n * DAY, report=False):
+        results = run_file(sc, guard, clock, T0 + n * DAY, report=False)
+        results, lines = run_delay_worker(sc, guard, results, T0 + n * DAY)
+        worker += lines
+        for r, res, status in results:
             rows.append((sc, r, res, status))
         radius += blast_radius(history, sc)
 
@@ -198,6 +234,9 @@ def cmd_run_all(directory: Path, db: str) -> int:
     if radius:
         print("")
         print("\n".join(radius))
+    if worker:
+        print("")
+        print("\n".join(worker))
     print("")
     print("all expectations met" if ok else "SOME EXPECTATIONS NOT MET")
     return 0 if ok else 1
@@ -209,11 +248,15 @@ def cmd_scenario(path: Path, db: str) -> int:
     clock = {"now": T0}
     guard = make_guard(sc, get_settings(), history, clock)
     results = run_file(sc, guard, clock, T0, report=True)
+    results, worker = run_delay_worker(sc, guard, results, T0)
     print("")
     print_breaker(history)
     if lines := blast_radius(history, sc):
         print("")
         print("\n".join(lines))
+    if worker:
+        print("")
+        print("\n".join(worker))
     return 0 if all(status == "OK" for *_, status in results) else 1
 
 

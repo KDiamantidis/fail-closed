@@ -22,6 +22,7 @@ import logging
 import secrets
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -145,9 +146,26 @@ class Services:
 
 
 def create_app(services: Services | None = None) -> FastAPI:
-    app = FastAPI(title="Fail Closed", version="0.2.0",
-                  description="Signing Guard: no approval, no signature.")
     svc = services or Services.default()
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        async def delay_worker():
+            while True:
+                try:
+                    await asyncio.to_thread(svc.holds.release_due)
+                except Exception:  # noqa: BLE001 - keep the worker alive; holds stay pending
+                    log.exception("DELAY worker failed")
+                await asyncio.sleep(svc.settings.delay_check_seconds)
+
+        task = asyncio.create_task(delay_worker())
+        try:
+            yield
+        finally:
+            task.cancel()
+
+    app = FastAPI(title="Fail Closed", version="0.3.0", lifespan=lifespan,
+                  description="Signing Guard: no approval, no signature.")
     app.state.services = svc
     app.add_middleware(CORSMiddleware, allow_origins=svc.settings.cors_origins, allow_methods=["GET", "POST"],
                        allow_headers=["Content-Type", "X-Admin-Token"], allow_credentials=False)
@@ -295,8 +313,12 @@ def create_app(services: Services | None = None) -> FastAPI:
                 results.append({"label": r.label, "expect": r.expect.model_dump(), **out})
         except GuardBusy as e:
             raise HTTPException(status_code=503, detail=f"Guard busy: {e}. Nothing was approved or signed.")
-        iso.publish("-", "run_finished", {"scenario": name})
+        # Demo: fast-forward the clock past the DELAY so the visitor sees what the worker decides.
+        later = time.time() + svc.settings.delay_minutes * 60 + 1
+        released = iso.holds.release_due(now=later)
+        iso.publish("-", "run_finished", {"scenario": name, "delay_worker": len(released)})
         return {"name": name, "title": sc.title, "run_id": run_id, "results": results,
+                "delay_worker": {"ran_at": f"+{svc.settings.delay_minutes} min (simulated)", "results": released},
                 "breaker": {"frozen_destinations": iso.history.frozen(), "paused_wallets": iso.history.paused()}}
 
     return app

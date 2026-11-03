@@ -1,7 +1,7 @@
 {
   "name": "e_mercado_multichain",
   "title": "(e) Mercado-style: one address drained across 5 chains, token by token",
-  "description": "No EIP-7702. A test micro-transfer, a large ETH transfer, then MockToken transfers to the SAME address on chains 1, 10, 42161, 137, 43114. R7 delays at 3 chains and blocks + freezes at 5; R8 counts 10 assets. After the freeze every transfer to that address is blocked, while a normal customer withdrawal from the same hot wallet still goes through. The multi-chain signal comes from history; each sandbox runs only its own chain.",
+  "description": "No EIP-7702. A test micro-transfer, a large ETH transfer, then MockToken transfers to the SAME address on chains 1, 10, 42161, 137, 43114. R7 delays at 3 chains and blocks + freezes at 5; R8 counts 10 assets. After the freeze every transfer to that address is blocked, while a normal customer withdrawal from the same hot wallet still goes through. The multi-chain signal comes from history; each sandbox runs only its own chain. The two DELAYed transfers are re-checked by the DELAY worker after 15 minutes: the destination is frozen by then, so they are NOT released.",
   "labels": {
     "0x1000000000000000000000000000000000000e01": "customer hot wallet",
     "0xbad0000000000000000000000000000000000e01": "attacker address",
@@ -258,7 +258,8 @@
         "verdict": "DELAY",
         "rules": [
           "R7"
-        ]
+        ],
+        "after_hold": "blocked"
       },
       "request": {
         "wallet_type": "customer_hot",
@@ -276,7 +277,8 @@
         "verdict": "DELAY",
         "rules": [
           "R7"
-        ]
+        ],
+        "after_hold": "blocked"
       },
       "request": {
         "wallet_type": "customer_hot",
