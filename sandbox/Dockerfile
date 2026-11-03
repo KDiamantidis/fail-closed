@@ -9,8 +9,10 @@ COPY foundry.toml ./
 COPY src ./src
 RUN forge build \
  && mkdir -p artifacts \
- && forge inspect MockSweeper deployedBytecode > artifacts/MockSweeper.hex \
- && grep -Eq '^0x[0-9a-f]+$' artifacts/MockSweeper.hex
+ && for c in MockSweeper MockToken; do \
+      forge inspect "$c" deployedBytecode > "artifacts/$c.hex" \
+      && grep -Eq '^0x[0-9a-f]+$' "artifacts/$c.hex" || exit 1; \
+    done
 
 # ---- runtime stage --------------------------------------------------------------
 FROM ghcr.io/foundry-rs/foundry:v1.8.5
@@ -22,7 +24,8 @@ COPY --from=build --chown=root:root /build/artifacts /sandbox/artifacts
 # Build fails if solc leaked into the runtime image or the artifact is missing.
 RUN ! command -v solc \
  && [ ! -d /home/foundry/.svm ] && [ ! -d /root/.svm ] \
- && grep -Eq '^0x[0-9a-f]+$' /sandbox/artifacts/MockSweeper.hex
+ && grep -Eq '^0x[0-9a-f]+$' /sandbox/artifacts/MockSweeper.hex \
+ && grep -Eq '^0x[0-9a-f]+$' /sandbox/artifacts/MockToken.hex
 USER foundry
 WORKDIR /tmp
 # The runner passes the anvil arguments (hardfork, chain id, host/port).

@@ -4,7 +4,15 @@ import pytest
 
 from app.config import Settings
 from app.models import TxRequest
-from sandbox_runner import ANVIL_ACCOUNTS, SandboxError, SandboxRunner, container_options
+from sandbox_runner import (
+    ANVIL_ACCOUNTS,
+    SandboxError,
+    SandboxRunner,
+    container_options,
+    delegation_mode,
+    merge_diffs,
+    push20_addresses,
+)
 from state_provider import StartingState
 from tests.fake_docker import FakeChain, FakeDocker
 from tests.helpers import BOB, tx
@@ -52,7 +60,8 @@ def test_happy_path_returns_joined_result_and_destroys_container():
     assert res.receipt["status"] == "0x1"
     assert res.state_diff["post"]
     assert len(res.tx["authorizationList"]) == 5
-    assert set(res.timings) == {"container_start", "state_inject", "tx", "trace", "destroy"}
+    assert set(res.timings) == {"container_start", "state_inject", "tx", "trace", "probe", "destroy"}
+    assert res.delegation_mode == "type4"
     assert res.sandbox["NetworkMode"] == "none"
     assert len(d.containers.created) == 1 and removed(d)
 
@@ -65,7 +74,7 @@ def test_state_is_injected_and_auths_signed_by_authority_index():
     signs = [c for c in d.chain.commands if c[:3] == ["cast", "wallet", "sign-auth"]]
     assert len(signs) == 5
     assert all(c[c.index("--mnemonic-index") + 1] == "1" for c in signs)  # HOT = index 1
-    send = next(c for c in d.chain.commands if c[:2] == ["cast", "send"])
+    send = d.chain.sends[0]
     assert send.count("--auth") == 5 and "--force" in send
     assert send[send.index("--mnemonic-index") + 1] == "2"  # ATTACKER = index 2
 
@@ -185,21 +194,145 @@ def test_docker_error_becomes_sandbox_error():
         runner(d).run(attack_tx(), STATE)
 
 
-# --- authorizations we cannot simulate honestly ------------------------------
+# --- delegation modes ------------------------------------------------------------
 
-def test_unsigned_auth_for_non_sandbox_account_raises():
-    t = attack_tx(authorization_list=[{"chain_id": 1, "address": SWEEPER, "nonce": 1, "authority": BOB}])
+REAL = "0x" + "a7" * 20  # a real wallet: no key in the sandbox
+
+
+def test_mode_selection():
+    assert delegation_mode(TxRequest.model_validate(tx())) is None
+    assert delegation_mode(attack_tx()) == "type4"
+    assert delegation_mode(attack_tx(authorization_list=[
+        {"chain_id": 1, "address": SWEEPER, "nonce": 1, "authority": REAL}])) == "effect"
+    assert delegation_mode(attack_tx(authorization_list=[
+        {"chain_id": 1, "address": SWEEPER, "nonce": 1, "authority": HOT, "y_parity": 0, "r": "0x1", "s": "0x2"}
+    ])) == "effect"  # pre-signed: we never re-sign, we apply the effect
+
+
+def test_effect_mode_sets_code_and_bumps_nonce_by_eip7702_rules():
+    state = StartingState.model_validate({"accounts": {REAL: {"balance": 10**20, "nonce": 7},
+                                                       SWEEPER: {"code": "artifact:MockSweeper"}}})
+    t = attack_tx(**{"from": ATTACKER}, authorization_list=[
+        {"chain_id": 1, "address": SWEEPER, "nonce": n, "authority": REAL} for n in range(3, 8)])
+    chain = FakeChain()
+    chain.diff = {"pre": {ATTACKER: {"balance": "0x1"}}, "post": {ATTACKER: {"nonce": 1}}}
+    d = FakeDocker(chain)
+    res = runner(d).run(t, state)
+    assert res.delegation_mode == "effect"
+    assert chain.code[REAL] == "0xef0100" + SWEEPER[2:]
+    assert chain.nonce[REAL] == 8  # only nonce 7 matched
+    assert not any(c[:3] == ["cast", "wallet", "sign-auth"] for c in chain.commands)  # no keys used
+    send = chain.sends[0]
+    assert "--unlocked" in send and "--auth" not in send
+    assert res.state_diff["post"][REAL] == {"code": "0xef0100" + SWEEPER[2:], "nonce": 8}
+    assert res.state_diff["pre"][REAL] == {"balance": hex(10**20), "nonce": 7}
+    assert len(res.tx["authorizationList"]) == 5 and res.tx["authorizationList"][0]["simulated"]
+
+
+def test_effect_mode_self_sponsored_needs_nonce_plus_one():
+    state = StartingState.model_validate({"accounts": {REAL: {"balance": 10**20, "nonce": 6}}})
+    t = TxRequest.model_validate(tx(**{"from": REAL, "to": REAL, "value": 0}, authorization_list=[
+        {"chain_id": 1, "address": SWEEPER, "nonce": n} for n in range(3, 8)]))
+    chain = FakeChain()
+    d = FakeDocker(chain)
+    runner(d).run(t, state)
+    # the tx itself uses nonce 6, so only the authorization with nonce 7 applies;
+    # the runner sets 7 and the tx bumps it to 8
+    assert chain.nonce[REAL] == 7 and chain.code[REAL].startswith("0xef0100")
+
+
+def test_effect_mode_pre_signed_without_authority_raises():
+    t = attack_tx(authorization_list=[{"chain_id": 1, "address": SWEEPER, "nonce": 1,
+                                       "y_parity": 0, "r": "0x1", "s": "0x2"}])
     d = FakeDocker()
-    with pytest.raises(SandboxError, match="not a sandbox account"):
+    with pytest.raises(SandboxError, match="authority of a pre-signed"):
         runner(d).run(t, STATE)
     assert removed(d)
 
 
-def test_pre_signed_auth_not_supported_yet():
-    t = attack_tx(authorization_list=[{"chain_id": 1, "address": SWEEPER, "nonce": 1,
-                                       "y_parity": 0, "r": "0x1", "s": "0x2"}])
-    with pytest.raises(SandboxError, match="pre-signed"):
-        runner(FakeDocker()).run(t, STATE)
+def test_merge_diffs_matches_a_real_type4_diff():
+    # real type-4 (from the Phase 2 probe): nonce 6 -> 8, code set, balance unchanged
+    real = {"pre": {HOT: {"balance": "0x10", "nonce": 6}},
+            "post": {HOT: {"code": "0xef0100" + SWEEPER[2:], "nonce": 8}}}
+    synthetic = {"pre": {HOT: {"balance": "0x10", "nonce": 6}},
+                 "post": {HOT: {"code": "0xef0100" + SWEEPER[2:], "nonce": 7}}}
+    tx_part = {"pre": {HOT: {"balance": "0x10", "nonce": 7, "code": "0xef0100" + SWEEPER[2:]}},
+               "post": {HOT: {"nonce": 8}}}
+    assert merge_diffs(synthetic, tx_part) == real
+
+
+def test_merge_diffs_zero_nonce_and_empty_code_stay_omitted_in_pre():
+    synthetic = {"pre": {HOT: {"balance": "0x0"}}, "post": {HOT: {"code": "0xef01", "nonce": 1}}}
+    tx_part = {"pre": {HOT: {"balance": "0x0", "nonce": 1, "code": "0xef01"}}, "post": {HOT: {"nonce": 2}}}
+    assert merge_diffs(synthetic, tx_part) == {"pre": {HOT: {"balance": "0x0"}},
+                                               "post": {HOT: {"code": "0xef01", "nonce": 2}}}
+
+
+# --- probe after delegation ----------------------------------------------------------
+
+SWEEPER_CODE = "0x6080" + "73" + ATTACKER[2:] + "33" + "73" + ATTACKER[2:] + "60ff"
+
+
+def test_push20_addresses():
+    assert push20_addresses(SWEEPER_CODE) == [ATTACKER]
+    assert push20_addresses("0x7f" + "73" * 32) == []  # 0x73 inside PUSH32 data is not an opcode
+    assert push20_addresses("0xzz") == []
+
+
+def delegated_chain() -> FakeChain:
+    chain = FakeChain()
+    chain.artifact_code = SWEEPER_CODE
+    chain.diff = {"pre": {HOT: {"balance": hex(100 * 10**18), "nonce": 7}},
+                  "post": {HOT: {"code": "0xef0100" + SWEEPER[2:], "nonce": 8}}}
+    return chain
+
+
+def test_probe_finds_sweep_by_embedded_attacker_and_stops():
+    chain = delegated_chain()
+    chain.probe_results["0x35faa416"] = (
+        {"status": "0x1", "logs": []},
+        {"pre": {HOT: {"balance": hex(100 * 10**18)}, ATTACKER: {"balance": "0x0"}},
+         "post": {HOT: {"balance": "0x0"}, ATTACKER: {"balance": hex(100 * 10**18)}}})
+    res = runner(FakeDocker(chain)).run(attack_tx(data="0x"), STATE)
+    calls = [(p["caller"], p["call"], p["moved"]) for p in res.probe]
+    assert calls == [(ATTACKER, "empty call", False), (ATTACKER, "sweep()", True)]
+    assert res.probe[-1]["native_out"] == {ATTACKER: str(100 * 10**18)}
+    assert res.probe[-1]["caller_kind"] == "address hard-coded in delegate code"
+    assert chain.snapshots == chain.reverts == 2  # every probe call is rolled back
+
+
+def test_probe_tries_random_outsider_and_records_nothing_moved():
+    chain = delegated_chain()
+    chain.artifact_code = "0x6080"  # no embedded addresses
+    res = runner(FakeDocker(chain)).run(attack_tx(data="0x"), STATE)
+    assert len(res.probe) == 4 and not any(p["moved"] for p in res.probe)
+    assert {p["caller_kind"] for p in res.probe} == {"random outside account"}
+
+
+def test_no_probe_without_delegation():
+    res = runner(FakeDocker()).run(TxRequest.model_validate(tx(**{"from": ANVIL_ACCOUNTS[0]})), STATE)
+    assert res.probe == [] and res.delegation_mode is None
+
+
+# --- fees and token balances ----------------------------------------------------------
+
+def test_zero_fees_everywhere():
+    d = FakeDocker()
+    runner(d).run(attack_tx(), STATE)
+    args = d.containers.run_kwargs["command"]
+    assert args[args.index("--base-fee") + 1] == "0" and args[args.index("--gas-price") + 1] == "0"
+    send = d.chain.sends[0]
+    assert send[send.index("--gas-price") + 1] == "0" and send[send.index("--priority-gas-price") + 1] == "0"
+
+
+def test_token_balances_injected_into_balanceof_slot_and_verified():
+    token = "0x" + "70" * 20
+    state = StartingState.model_validate({"accounts": {
+        HOT: {"balance": 1, "token_balances": {token: 5 * 10**18}}, token: {"code": "artifact:MockToken"}}})
+    chain = FakeChain()
+    runner(FakeDocker(chain)).run(TxRequest.model_validate(tx(**{"from": HOT})), state)
+    slot = "0x" + (HOT[2:] + "00" * 12)[:64]
+    assert int(chain.storage[(token, slot)], 16) == 5 * 10**18
 
 
 def test_plain_transfer_without_auths():

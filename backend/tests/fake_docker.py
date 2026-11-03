@@ -26,18 +26,30 @@ class FakeChain:
         self.code: dict[str, str] = {}
         self.storage: dict[tuple[str, str], str] = {}
         self.auth_count = 0
+        self.sends: list[list[str]] = []
         self.receipt = {"transactionHash": TX_HASH, "status": "0x1", "logs": []}
         self.diff = {"pre": {"0xaa": {"balance": "0x10"}}, "post": {"0xaa": {"balance": "0x0"}}}
+        self.artifact_code = "0x6080604052"
+        self.probe_results: dict[str, tuple[dict, dict]] = {}  # selector -> (receipt, diff)
         self.mined_tx_override = None
         self.drop_set_nonce = False
         self.block_on: str | None = None  # command word that hangs until the container is removed
         self.fail_on: str | None = None  # command word that exits non-zero
         self.commands: list[list[str]] = []
+        self.snapshots = 0
+        self.reverts = 0
 
     def mined_tx(self):
         if self.mined_tx_override is not None:
             return self.mined_tx_override
         return {"hash": TX_HASH, "authorizationList": [{"nonce": hex(i)} for i in range(self.auth_count)]}
+
+    def _probe(self, h: str):
+        idx = int(h, 16) - 1
+        cmd = self.sends[idx + 1]
+        selector = cmd[-1] if cmd[-1].startswith("0x") and len(cmd[-1]) == 10 else "0x"
+        receipt, diff = self.probe_results.get(selector, ({"status": "0x0", "logs": []}, {"pre": {}, "post": {}}))
+        return {"transactionHash": h, **receipt}, diff
 
     def handle(self, argv: list[str], removed: threading.Event) -> tuple[int, str]:
         self.commands.append(argv)
@@ -52,12 +64,15 @@ class FakeChain:
         if argv[:2] == ["cast", "block-number"]:
             return 0, "1"
         if argv[0] == "cat":
-            return 0, "0x6080604052\n"
+            return 0, self.artifact_code + "\n"
+        if argv[:3] == ["cast", "index", "address"]:
+            return 0, "0x" + (argv[3][2:] + "00" * 12)[:64]
         if argv[:3] == ["cast", "wallet", "sign-auth"]:
             self.auth_count += 1
             return 0, "0xf85a" + "00" * 40
         if argv[:2] == ["cast", "send"]:
-            return 0, TX_HASH
+            self.sends.append(argv)
+            return 0, TX_HASH if len(self.sends) == 1 else "0x" + format(len(self.sends) - 1, "064x")
         if method:
             p = json.loads(argv[6])
             if method == "anvil_setBalance":
@@ -77,12 +92,20 @@ class FakeChain:
                 return 0, json.dumps(self.code.get(p[0], "0x"))
             elif method == "eth_getStorageAt":
                 return 0, json.dumps(self.storage.get((p[0], p[1]), "0x" + "0" * 64))
+            elif method == "evm_snapshot":
+                self.snapshots += 1
+                return 0, json.dumps(hex(self.snapshots))
+            elif method == "evm_revert":
+                self.reverts += 1
+                return 0, "true"
             elif method == "eth_getTransactionReceipt":
-                return 0, json.dumps(self.receipt)
+                if p[0] == TX_HASH:
+                    return 0, json.dumps(self.receipt)
+                return 0, json.dumps(self._probe(p[0])[0])
             elif method == "eth_getTransactionByHash":
-                return 0, json.dumps(self.mined_tx())
+                return 0, json.dumps(self.mined_tx() if p[0] == TX_HASH else {"hash": p[0]})
             elif method == "debug_traceTransaction":
-                return 0, json.dumps(self.diff)
+                return 0, json.dumps(self.diff if p[0] == TX_HASH else self._probe(p[0])[1])
             return 0, "null"
         return 127, f"unknown command {argv}"
 
