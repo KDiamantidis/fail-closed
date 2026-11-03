@@ -72,6 +72,10 @@ class Guard:
         # Explanations never hold up a verdict: slow/early-path explanations are made here, in the
         # background, then stored in history and sent as an SSE "explanation" event.
         self._explain_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="explain")
+        # The fast-path escalation call has its OWN pool: it must never queue behind background
+        # explanations (under load that queueing made calls hit the 2 s timeout and pushed most
+        # traffic to the slow path, which made more explanations: a feedback loop).
+        self._escalate_pool = ThreadPoolExecutor(max_workers=32, thread_name_prefix="escalate")
 
     def emit(self, check_id: str, kind: str, data: dict) -> None:
         if self.events is None:
@@ -231,7 +235,7 @@ class Guard:
             return Path.FAST, reasons + ["LLM escalation off"], None
         limit = s.fast_path_llm_timeout_seconds
         t0 = self.perf()
-        future = self._explain_pool.submit(self._explain, tx, None)
+        future = self._escalate_pool.submit(self._explain, tx, None)
         try:
             llm = future.result(timeout=limit)
         except FutureTimeout:

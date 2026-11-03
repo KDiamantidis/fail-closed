@@ -42,8 +42,8 @@ Fail Closed:
 
 | Path | When | What happens | Speed |
 |---|---|---|---|
-| **Fast path** | Plain transfer, known destination, small amount, wallet under its limits | Approve right away, no sandbox | *(to be measured)* |
-| **Slow path** | Anything else: EIP-7702, contract calls, unknown destination, large amount | Run in the sandbox, read the state diff, apply rules | *(to be measured)* |
+| **Fast path** | Plain transfer, known destination, small amount, wallet under its limits | Approve right away, no sandbox | p50 16 ms; 804 ms with the AI escalation check (mock, 800 ms) |
+| **Slow path** | Anything else: EIP-7702, contract calls, unknown destination, large amount | Run in the sandbox, read the state diff, apply rules | p50 1.8 s (warm sandbox) / 2.6 s (fresh) |
 
 The fast path does not ask "does this look bad?". It asks "does this match something we know is safe, exactly?". Everything else gets checked.
 
@@ -58,7 +58,7 @@ Every request names its `wallet_type` and `chain_id`.
 | `customer_hot` | Customers' own addresses, unknown in advance. No allowlist. | Behavior rules: R6, R7, R8, C1 |
 | `treasury` | A few known addresses | Strict allowlist: R4, R5 |
 
-R0, R1, R2, R3 and the breaker checks F1 (destination frozen) / F2 (wallet paused) apply to every wallet.
+R0, R1, R2, R3 and the breaker checks F1 (destination frozen), F2 (wallet paused), F3 (chain in safe mode, NEEDS_HUMAN) and F4 (global stop, BLOCK) apply to every wallet.
 
 ### Verdicts
 
@@ -81,22 +81,24 @@ R0, R1, R2, R3 and the breaker checks F1 (destination frozen) / F2 (wallet pause
 | R6 | Wallet outflow in a time window above limit | customer_hot | BLOCK |
 | R7 | Same destination receives from ≥ 3 chains in 6 h | customer_hot | DELAY; from ≥ 5 chains → freeze that address |
 | R8 | ≥ 10 different assets to one address in 30 min | customer_hot | Freeze that address |
-| C1 *(planned)* | A transaction that is not a native transfer or an ERC-20 `transfer(address,uint256)` to a known token | customer_hot | NEEDS_HUMAN |
+| C1 | A transaction that is not a native transfer or an ERC-20 `transfer(address,uint256)` to a known token | customer_hot | NEEDS_HUMAN |
 
 Thresholds are starting values in `.env`, not tuned on real traffic.
 
 ### Circuit breaker
 
-Steps, from narrow to wide. Each step is **latched**: it stays on until a human resets it.
+Steps, from narrow to wide. Each step is **latched**: it stays on until a human resets it
+(`POST /breaker/reset` with the admin token, or `cli.py reset`), and every reset is logged with who did it.
 
-| Level | Action | Trigger |
+| Level | In simple words | Trigger |
 |---|---|---|
-| 1 | Freeze one destination address | e.g. R7 (≥ 5 chains), R8 |
-| 2 | Pause one wallet | R1, R2, or R3 with sandbox evidence (never an honest large withdrawal) |
-| 3 | Safe mode on one chain | Many signals on one chain |
-| 4 | Global stop | Only with **≥ 2 independent signals** |
+| 1 | **Freeze one address.** Nothing more goes to it. | R7 (same address from ≥ 5 chains) or R8 (≥ 10 assets) |
+| 2 | **Pause one wallet.** It signs nothing until a human looks. | R1, R2, or R3 with sandbox evidence (never an honest large withdrawal) |
+| 3 | **Safe mode on one chain.** That chain has no fast path; every request there waits for a human (and is still checked). | ≥ 2 wallets paused, or ≥ 3 sandbox-evidence BLOCKs, on that chain within 60 min |
+| 4 | **Global stop.** No approvals at all. | Only with **≥ 2 independent signals**: safe mode on 2 chains, or safe mode + a red-team payload that was not contained |
 
-A full stop hurts every customer, so the breaker starts as narrow as possible.
+A full stop hurts every customer, so the breaker starts as narrow as possible. Scenario (g)
+climbs all four levels and shows the reset.
 
 ### Example: a Binance-style request
 
@@ -171,7 +173,33 @@ Python + FastAPI · Docker · Foundry (Anvil, Prague hardfork) · Vultr Serverle
 
 ## Results
 
-*(Measured numbers will go here: fast path time, slow path time, 500 normal + 1 attack test, red-team results.)*
+> Measured on a **laptop** (Windows 11, 16 CPUs) with **Docker Desktop** (7.4 GiB VM) and a
+> **mock LLM** (no Vultr key yet: 800 ms per call, escalates 5% of plain transfers). These
+> numbers will be re-run on the Vultr VM with the real model.
+
+**500 normal withdrawals + 1 hidden Binance-style attack**, 8 requests at a time, through the
+full flow (Guard → approval → signer). 3 hot wallets, native + 3 tokens, 4 chains, 10 simulated hours.
+
+| Config | Attack stopped | Normal not ALLOWed | Fast path p50 / p95 / p99 | Slow path p50 / p95 / p99 | Throughput | Sandboxes started |
+|---|---|---|---|---|---|---|
+| fresh sandbox, AI escalation on | **1/1** | **0** | 804 / 808 / 820 ms | 2638 / 3425 / 3620 ms | 8.7 req/s | 26 |
+| fresh sandbox, AI escalation off | **1/1** | **0** | 16 / 24 / 27 ms | 3473 ms (attack only) | 126.6 req/s | 1 |
+| warm sandbox, AI escalation on | **1/1** | **0** | 804 / 813 / 826 ms | **1754 / 2002 / 2456 ms** | 9.3 req/s | 4 |
+| warm sandbox, AI escalation off | **1/1** | **0** | 16 / 26 / 32 ms | 2854 ms (attack only) | **150.7 req/s** | 4 |
+
+- **The attack was stopped in every config** (R1 + R2 + R3 from the probe, BLOCK, no signature)
+  and **no normal customer was refused**.
+- The AI escalation check costs one model call per fast-path request (here 800 ms, the mock's
+  latency). With it on, 25 of the 500 were sent to the sandbox for a deeper look; all were then allowed.
+- A **warm sandbox pool** (containers kept ready, `evm_snapshot`/`evm_revert` per check, a clean
+  check before every reuse) is about 0.9 s faster per slow check and starts 4 containers instead of one per check.
+- Red team: 7/7 payloads contained, the API kept answering during the fork and memory bombs (see Containment).
+- Full data: `docs/results/` (JSON + table with machine info). Re-run: `backend/cli.py loadtest`.
+
+What the load test found and we fixed: anvil started with `--chain-id 10` loads Optimism
+settings and exits with the Prague hardfork, so every slow check on chain 10 was a false BLOCK
+(now the chain id is set after start and read back). It also showed that slow-path explanations
+must never share a thread pool with the fast-path AI check.
 
 ## Honest limits
 
@@ -183,6 +211,8 @@ Python + FastAPI · Docker · Foundry (Anvil, Prague hardfork) · Vultr Serverle
 - EIP-7702 for real wallets is simulated by its effect (delegation code + nonce bump, following the EIP-7702 nonce rules), because the Guard has no wallet keys and is asked before the signature exists. A test proves it gives the same diff as a real type-4 transaction for test accounts. Pre-signed authorizations must name their authority (no signature recovery yet), otherwise BLOCK.
 - The mock signer signs the request hash with a public Anvil demo key to show the flow; it does not produce a broadcastable transaction.
 - The Guard key file is checked for owner-only permissions on Linux/macOS (the VM); on Windows the check is skipped.
+- The AI explanation is untrusted output too: it is length-limited plain text, made after the verdict, and never read by the rules. The untrusted request data is sent to the model inside one marked block it is told never to obey.
+- Measured numbers so far come from a laptop with a mock LLM (see Results).
 
 ## How to run
 
@@ -210,6 +240,7 @@ backend/.venv/bin/python backend/cli.py reset --address 0x... --actor alice --db
 | (d) Binance-style: 5 EIP-7702 authorizations to a sweeper | BLOCK on the slow path (R1, R2, R3 from the probe), wallet paused |
 | (e) Mercado-style: one address, 5 chains, token by token | ALLOW, then DELAY (R7), then BLOCK (R7, R8) and the address is frozen; other customers still ALLOW; the report shows the blast radius (value allowed before the freeze) |
 | (f) honest large withdrawal (40% of the hot wallet) | NEEDS_HUMAN (R3 without sandbox evidence), wallet not paused, next customer ALLOW |
+| (g) coordinated attack on several wallets and chains | breaker level 1 → 2 → 3 → 4 (global stop), then an ops lead resets and service resumes |
 
 AI: copy `.env.example` to `.env` and set `VULTR_INFERENCE_API_KEY`. Without a key the
 AI is a local mock and every result is marked **[MOCK]**. With a key, a failure never
@@ -255,6 +286,7 @@ curl -N localhost:8000/stream                                 # live events (SSE
 | `GET /events?after=` | The same events as JSON, to catch up |
 | `GET /scenarios`, `POST /scenarios/{name}/run` | Demo scenarios, run through `/withdraw`. Each run has its **own fresh state** and a `run_id` (one visitor never changes another's result); the DELAY worker is fast-forwarded at the end |
 | `GET /pending`, `POST /pending/{id}/approve`, `/reject` | NEEDS_HUMAN waits for a human (`X-Admin-Token`). Approve re-checks the rules first; a new freeze/pause/finding turns it into BLOCK. Logged with who and when |
+| `POST /loadtest/run?normal=50` | The load demo for the UI: N normal + 1 hidden attack on isolated state, one SSE event per request, then the summary (mock LLM, labelled) |
 | `POST /redteam/run`, `GET /redteam/last` | Containment check (SSE, one event per payload); admin unless `REDTEAM_PUBLIC=true` |
 | `GET /guard/public-key`, `GET /health` | The Guard's ed25519 public key; status |
 

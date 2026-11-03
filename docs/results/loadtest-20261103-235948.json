@@ -1,0 +1,391 @@
+{
+  "machine": {
+    "os": "Windows-11-10.0.26300-SP0",
+    "python": "3.14.7",
+    "cpus": 16,
+    "processor": "AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD",
+    "docker": "29.8.0",
+    "docker_os": "Docker Desktop",
+    "docker_cpus": 16,
+    "docker_mem_gib": 7.4
+  },
+  "seed": 7,
+  "results": [
+    {
+      "config": "fresh/escalation-on",
+      "overrides": {
+        "sandbox_mode": "fresh",
+        "fast_path_llm_escalation": true
+      },
+      "requests": 501,
+      "normal": 500,
+      "attacks": 1,
+      "attacks_stopped": 1,
+      "attack_result": {
+        "i": 239,
+        "attack": true,
+        "kind": "eip7702-attack",
+        "chain": 1,
+        "verdict": "BLOCK",
+        "path": "slow",
+        "rules": [
+          "C1",
+          "R1",
+          "R2",
+          "R3"
+        ],
+        "signed": false,
+        "ms": 3527.4,
+        "escalated": false,
+        "detail": "[R2] Nonces 999, 1000, 1001. A wallet never needs more than one; many nonces at once is how an attacker makes sure one of them matches.; [C1] Customer withdrawals are plain transfers (native or a known token). 3 EIP-7702 authorization(s).; [R1] 0x1000000000000000000000000000000000000104 gets code 0xef010000000000000000000000000000000000005eeeee (was 0x): from now on it runs the code of 0x00000000000000000000000000000000005eeeee, which i; [R3] 0x1000000000000000000000000000000000000104 -> 0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc: 3,000 ETH of 3,000 ETH (100.0%). Evidence: probe: 0x3c44..93bc (address hard-coded in delegate code) call",
+        "timings_ms": {
+          "state": 0,
+          "request_rules": 3,
+          "sandbox": 3522,
+          "sandbox.container_start": 888,
+          "sandbox.state_inject": 386,
+          "sandbox.tx": 540,
+          "sandbox.trace": 127,
+          "sandbox.probe": 1269,
+          "sandbox.destroy": 310,
+          "decide": 0,
+          "total": 3526
+        }
+      },
+      "normal_not_allowed": 0,
+      "normal_not_allowed_by_verdict": {},
+      "normal_not_allowed_by_rule": {},
+      "normal_not_allowed_rows": [],
+      "normal_signed": 500,
+      "paths": {
+        "fast": 475,
+        "slow": 26
+      },
+      "escalated": 25,
+      "latency_ms": {
+        "fast": {
+          "n": 475,
+          "p50": 804.4,
+          "p95": 808.1,
+          "p99": 819.7,
+          "mean": 805.1
+        },
+        "slow": {
+          "n": 26,
+          "p50": 2638.2,
+          "p95": 3424.7,
+          "p99": 3619.7,
+          "mean": 2752.6
+        },
+        "early": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "mean": null
+        }
+      },
+      "total_seconds": 57.63,
+      "throughput_rps": 8.7,
+      "concurrency": 8,
+      "sandboxes_started": 26,
+      "sandbox_retries": 0,
+      "busy_503": 0,
+      "pool": null,
+      "pool_warm_up_seconds": 0.0,
+      "llm": {
+        "mode": "mock",
+        "calls": 526,
+        "latency_ms": 800,
+        "escalate_rate": 0.05
+      },
+      "sandbox_timeout_seconds": 10.0
+    },
+    {
+      "config": "fresh/escalation-off",
+      "overrides": {
+        "sandbox_mode": "fresh",
+        "fast_path_llm_escalation": false
+      },
+      "requests": 501,
+      "normal": 500,
+      "attacks": 1,
+      "attacks_stopped": 1,
+      "attack_result": {
+        "i": 239,
+        "attack": true,
+        "kind": "eip7702-attack",
+        "chain": 1,
+        "verdict": "BLOCK",
+        "path": "slow",
+        "rules": [
+          "C1",
+          "R1",
+          "R2",
+          "R3"
+        ],
+        "signed": false,
+        "ms": 3472.7,
+        "escalated": false,
+        "detail": "[R2] Nonces 999, 1000, 1001. A wallet never needs more than one; many nonces at once is how an attacker makes sure one of them matches.; [C1] Customer withdrawals are plain transfers (native or a known token). 3 EIP-7702 authorization(s).; [R1] 0x1000000000000000000000000000000000000104 gets code 0xef010000000000000000000000000000000000005eeeee (was 0x): from now on it runs the code of 0x00000000000000000000000000000000005eeeee, which i; [R3] 0x1000000000000000000000000000000000000104 -> 0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc: 3,000 ETH of 3,000 ETH (100.0%). Evidence: probe: 0x3c44..93bc (address hard-coded in delegate code) call",
+        "timings_ms": {
+          "state": 0,
+          "request_rules": 15,
+          "sandbox": 3455,
+          "sandbox.container_start": 933,
+          "sandbox.state_inject": 350,
+          "sandbox.tx": 546,
+          "sandbox.trace": 117,
+          "sandbox.probe": 1187,
+          "sandbox.destroy": 320,
+          "decide": 0,
+          "total": 3470
+        }
+      },
+      "normal_not_allowed": 0,
+      "normal_not_allowed_by_verdict": {},
+      "normal_not_allowed_by_rule": {},
+      "normal_not_allowed_rows": [],
+      "normal_signed": 500,
+      "paths": {
+        "fast": 500,
+        "slow": 1
+      },
+      "escalated": 0,
+      "latency_ms": {
+        "fast": {
+          "n": 500,
+          "p50": 16.1,
+          "p95": 23.8,
+          "p99": 27.0,
+          "mean": 15.8
+        },
+        "slow": {
+          "n": 1,
+          "p50": 3472.7,
+          "p95": 3472.7,
+          "p99": 3472.7,
+          "mean": 3472.7
+        },
+        "early": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "mean": null
+        }
+      },
+      "total_seconds": 3.96,
+      "throughput_rps": 126.6,
+      "concurrency": 8,
+      "sandboxes_started": 1,
+      "sandbox_retries": 0,
+      "busy_503": 0,
+      "pool": null,
+      "pool_warm_up_seconds": 0.0,
+      "llm": {
+        "mode": "mock",
+        "calls": 1,
+        "latency_ms": 800,
+        "escalate_rate": 0.05
+      },
+      "sandbox_timeout_seconds": 10.0
+    },
+    {
+      "config": "warm/escalation-on",
+      "overrides": {
+        "sandbox_mode": "warm",
+        "fast_path_llm_escalation": true
+      },
+      "requests": 501,
+      "normal": 500,
+      "attacks": 1,
+      "attacks_stopped": 1,
+      "attack_result": {
+        "i": 239,
+        "attack": true,
+        "kind": "eip7702-attack",
+        "chain": 1,
+        "verdict": "BLOCK",
+        "path": "slow",
+        "rules": [
+          "C1",
+          "R1",
+          "R2",
+          "R3"
+        ],
+        "signed": false,
+        "ms": 2602.0,
+        "escalated": false,
+        "detail": "[R2] Nonces 999, 1000, 1001. A wallet never needs more than one; many nonces at once is how an attacker makes sure one of them matches.; [C1] Customer withdrawals are plain transfers (native or a known token). 3 EIP-7702 authorization(s).; [R1] 0x1000000000000000000000000000000000000104 gets code 0xef010000000000000000000000000000000000005eeeee (was 0x): from now on it runs the code of 0x00000000000000000000000000000000005eeeee, which i; [R3] 0x1000000000000000000000000000000000000104 -> 0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc: 3,000 ETH of 3,000 ETH (100.0%). Evidence: probe: 0x3c44..93bc (address hard-coded in delegate code) call",
+        "timings_ms": {
+          "state": 0,
+          "request_rules": 0,
+          "sandbox": 2599,
+          "sandbox.pool_acquire": 236,
+          "sandbox.state_inject": 362,
+          "sandbox.tx": 535,
+          "sandbox.trace": 115,
+          "sandbox.probe": 1236,
+          "sandbox.revert": 115,
+          "sandbox.release": 0,
+          "decide": 0,
+          "total": 2600
+        }
+      },
+      "normal_not_allowed": 0,
+      "normal_not_allowed_by_verdict": {},
+      "normal_not_allowed_by_rule": {},
+      "normal_not_allowed_rows": [],
+      "normal_signed": 500,
+      "paths": {
+        "fast": 475,
+        "slow": 26
+      },
+      "escalated": 25,
+      "latency_ms": {
+        "fast": {
+          "n": 475,
+          "p50": 804.1,
+          "p95": 813.2,
+          "p99": 825.9,
+          "mean": 805.5
+        },
+        "slow": {
+          "n": 26,
+          "p50": 1754.0,
+          "p95": 2002.2,
+          "p99": 2456.3,
+          "mean": 1812.0
+        },
+        "early": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "mean": null
+        }
+      },
+      "total_seconds": 54.08,
+      "throughput_rps": 9.3,
+      "concurrency": 8,
+      "sandboxes_started": 4,
+      "sandbox_retries": 0,
+      "busy_503": 0,
+      "pool": {
+        "started": 4,
+        "reused": 26,
+        "dirty": 0,
+        "discarded": 0,
+        "retired": 0
+      },
+      "pool_warm_up_seconds": 3.9,
+      "llm": {
+        "mode": "mock",
+        "calls": 526,
+        "latency_ms": 800,
+        "escalate_rate": 0.05
+      },
+      "sandbox_timeout_seconds": 10.0
+    },
+    {
+      "config": "warm/escalation-off",
+      "overrides": {
+        "sandbox_mode": "warm",
+        "fast_path_llm_escalation": false
+      },
+      "requests": 501,
+      "normal": 500,
+      "attacks": 1,
+      "attacks_stopped": 1,
+      "attack_result": {
+        "i": 239,
+        "attack": true,
+        "kind": "eip7702-attack",
+        "chain": 1,
+        "verdict": "BLOCK",
+        "path": "slow",
+        "rules": [
+          "C1",
+          "R1",
+          "R2",
+          "R3"
+        ],
+        "signed": false,
+        "ms": 2854.3,
+        "escalated": false,
+        "detail": "[R2] Nonces 999, 1000, 1001. A wallet never needs more than one; many nonces at once is how an attacker makes sure one of them matches.; [C1] Customer withdrawals are plain transfers (native or a known token). 3 EIP-7702 authorization(s).; [R1] 0x1000000000000000000000000000000000000104 gets code 0xef010000000000000000000000000000000000005eeeee (was 0x): from now on it runs the code of 0x00000000000000000000000000000000005eeeee, which i; [R3] 0x1000000000000000000000000000000000000104 -> 0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc: 3,000 ETH of 3,000 ETH (100.0%). Evidence: probe: 0x3c44..93bc (address hard-coded in delegate code) call",
+        "timings_ms": {
+          "state": 0,
+          "request_rules": 5,
+          "sandbox": 2846,
+          "sandbox.pool_acquire": 354,
+          "sandbox.state_inject": 432,
+          "sandbox.tx": 576,
+          "sandbox.trace": 137,
+          "sandbox.probe": 1228,
+          "sandbox.revert": 119,
+          "sandbox.release": 0,
+          "decide": 0,
+          "total": 2852
+        }
+      },
+      "normal_not_allowed": 0,
+      "normal_not_allowed_by_verdict": {},
+      "normal_not_allowed_by_rule": {},
+      "normal_not_allowed_rows": [],
+      "normal_signed": 500,
+      "paths": {
+        "fast": 500,
+        "slow": 1
+      },
+      "escalated": 0,
+      "latency_ms": {
+        "fast": {
+          "n": 500,
+          "p50": 16.1,
+          "p95": 26.2,
+          "p99": 31.7,
+          "mean": 16.2
+        },
+        "slow": {
+          "n": 1,
+          "p50": 2854.3,
+          "p95": 2854.3,
+          "p99": 2854.3,
+          "mean": 2854.3
+        },
+        "early": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "mean": null
+        }
+      },
+      "total_seconds": 3.33,
+      "throughput_rps": 150.7,
+      "concurrency": 8,
+      "sandboxes_started": 4,
+      "sandbox_retries": 0,
+      "busy_503": 0,
+      "pool": {
+        "started": 4,
+        "reused": 1,
+        "dirty": 0,
+        "discarded": 0,
+        "retired": 0
+      },
+      "pool_warm_up_seconds": 4.06,
+      "llm": {
+        "mode": "mock",
+        "calls": 1,
+        "latency_ms": 800,
+        "escalate_rate": 0.05
+      },
+      "sandbox_timeout_seconds": 10.0
+    }
+  ],
+  "created": "20261103-235948",
+  "note": "laptop, Docker Desktop, mock LLM; to be re-run on the Vultr VM"
+}

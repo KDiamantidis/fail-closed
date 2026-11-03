@@ -64,4 +64,6 @@ def test_run_all_meets_every_expectation(tmp_path, capsys):
     assert main(["run-all", "--db", str(tmp_path / "all.sqlite3")]) == 0
     out = capsys.readouterr().out
     assert "all expectations met" in out
-    assert "frozen destinations (level 1): 1" in out and "paused wallets (level 2): 1" in out
+    # (e) and (g) freeze one address each; (d) pauses 1 wallet and (g) pauses 4
+    assert "frozen destinations (level 1): 2" in out and "paused wallets (level 2): 5" in out
+    assert "global stop (level 4): off" in out  # (g) ends with the ops lead reset

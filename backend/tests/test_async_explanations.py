@@ -127,3 +127,13 @@ def test_parse_clips_and_strips_control_characters():
                                      "explanation": "a\x00b\x07c" + "y" * 5000}))
     assert len(a.intent_summary) == MAX_SUMMARY_CHARS and a.intent_summary.endswith("…")
     assert "\x00" not in a.explanation and len(a.explanation) == MAX_EXPLANATION_CHARS
+
+
+def test_escalation_calls_never_wait_behind_background_explanations():
+    """Regression (load test): with a shared pool, fast-path calls queued behind explanations,
+    timed out and pushed traffic to the slow path."""
+    g = guard(explainer=SlowExplainer(0.3), fast_path_llm_timeout_seconds=1.0)
+    for _ in range(8):  # fill the background pool with slow explanations
+        g._explain_pool.submit(time.sleep, 0.8)
+    r = g.check(req())
+    assert r.verdict.path is Path.FAST, r.verdict.path_reasons
