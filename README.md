@@ -168,8 +168,9 @@ falls back to the mock. To use the stronger model, set `VULTR_MODEL=glm-5.3`.
 Unit tests in Python 3.12 (no Docker needed inside):
 
 ```sh
-docker run --rm -v "$PWD/backend:/src:ro" python:3.12-slim sh -c \
-  "mkdir /w && cd /src && tar --exclude=./.venv -cf - . | tar -xf - -C /w && cd /w && pip install -q -e '.[dev]' && pytest -q"
+docker run --rm -v "$PWD:/src:ro" python:3.12-slim sh -c \
+  "mkdir /w && cd /src && tar --exclude=./backend/.venv -cf - backend scenarios | tar -xf - -C /w \
+   && cd /w/backend && pip install -q -e '.[dev]' && pytest -q"
 ```
 
 Real sandbox tests (need Docker and the sandbox image; skipped otherwise):

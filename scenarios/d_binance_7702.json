@@ -1,0 +1,37 @@
+{
+  "name": "d_binance_7702",
+  "title": "(d) Binance-style: hot wallet asked to sign 5 EIP-7702 authorizations to a sweeper",
+  "description": "A compromised withdrawal service asks the hot wallet to sign a type-4 transaction with 5 authorizations (nonces 3-7) that delegate it to MockSweeper. The wallet's nonce is 6: the tx itself uses 6, so the authorization with nonce 7 matches. The request contains no sweep call; the Guard's probe finds it. The hot wallet is Anvil test account #1, so the sandbox replays a real type-4 tx.",
+  "labels": {
+    "0x70997970c51812dc3a010c7d01b50e0d17dc79c8": "hot wallet",
+    "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc": "attacker (hard-coded in sweeper)",
+    "0x00000000000000000000000000000000005eeeee": "MockSweeper"
+  },
+  "policy": {"delegate_allowlist": []},
+  "state": {
+    "accounts": {
+      "0x70997970C51812dc3A010C7d01b50e0d17dc79C8": {"balance": "100000000000000000000", "nonce": 6},
+      "0x00000000000000000000000000000000005eeeee": {"code": "artifact:MockSweeper"}
+    }
+  },
+  "requests": [
+    {
+      "t": 0,
+      "label": "type-4 tx with 5 authorizations to MockSweeper",
+      "expect": {"verdict": "BLOCK", "path": "slow", "rules": ["R1", "R2", "R3"]},
+      "request": {
+        "wallet_type": "customer_hot", "chain_id": 1,
+        "from": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+        "to": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+        "data": "0x", "value": "0",
+        "authorization_list": [
+          {"chain_id": 1, "address": "0x00000000000000000000000000000000005eeeee", "nonce": 3},
+          {"chain_id": 1, "address": "0x00000000000000000000000000000000005eeeee", "nonce": 4},
+          {"chain_id": 1, "address": "0x00000000000000000000000000000000005eeeee", "nonce": 5},
+          {"chain_id": 1, "address": "0x00000000000000000000000000000000005eeeee", "nonce": 6},
+          {"chain_id": 1, "address": "0x00000000000000000000000000000000005eeeee", "nonce": 7}
+        ]
+      }
+    }
+  ]
+}

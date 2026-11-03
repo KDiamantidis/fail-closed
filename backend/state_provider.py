@@ -107,7 +107,8 @@ class StateProvider(ABC):
 
 
 class ScenarioStateProvider(StateProvider):
-    """Reads the starting state from scenarios/<name>/state.json (Guard-side file).
+    """Reads the starting state from a scenario file (its "state" section) or a bare
+    state file ({"accounts": ...}). Both are Guard-side files, never the request.
 
     Accounts that the request touches but the scenario does not list start empty,
     exactly like a fresh address on chain.
@@ -116,6 +117,8 @@ class ScenarioStateProvider(StateProvider):
     def __init__(self, state_file: Path):
         self.state_file = Path(state_file)
         raw = json.loads(self.state_file.read_text(encoding="utf-8"))
+        if isinstance(raw, dict) and "state" in raw:
+            raw = raw["state"]
         self._state = StartingState.model_validate(raw)
 
     def get_state(self, tx: TxRequest) -> StartingState:

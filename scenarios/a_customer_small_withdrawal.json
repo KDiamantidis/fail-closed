@@ -1,0 +1,28 @@
+{
+  "name": "a_customer_small_withdrawal",
+  "title": "(a) Customer hot wallet: small native withdrawal",
+  "description": "An ordinary customer withdrawal. Known-safe shape, no findings: fast path, no sandbox.",
+  "labels": {
+    "0x1000000000000000000000000000000000000a01": "customer hot wallet",
+    "0xc000000000000000000000000000000000000a01": "customer"
+  },
+  "policy": {},
+  "state": {
+    "accounts": {
+      "0x1000000000000000000000000000000000000a01": {"balance": "500000000000000000000", "nonce": 1200}
+    }
+  },
+  "requests": [
+    {
+      "t": 0,
+      "label": "0.5 ETH to a customer",
+      "expect": {"verdict": "ALLOW", "path": "fast"},
+      "request": {
+        "wallet_type": "customer_hot", "chain_id": 1,
+        "from": "0x1000000000000000000000000000000000000a01",
+        "to": "0xc000000000000000000000000000000000000a01",
+        "data": "0x", "value": "500000000000000000"
+      }
+    }
+  ]
+}

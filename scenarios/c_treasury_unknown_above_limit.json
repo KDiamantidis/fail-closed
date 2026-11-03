@@ -1,0 +1,32 @@
+{
+  "name": "c_treasury_unknown_above_limit",
+  "title": "(c) Treasury: plain transfer to an unknown address, above limit",
+  "description": "Not on the allowlist and above the limit: R5 blocks.",
+  "labels": {
+    "0x7000000000000000000000000000000000000c01": "treasury wallet",
+    "0x5afe000000000000000000000000000000000c01": "exchange cold storage (allowlisted)",
+    "0xbad0000000000000000000000000000000000c01": "unknown address"
+  },
+  "policy": {
+    "treasury_allowlist": ["0x5afe000000000000000000000000000000000c01"],
+    "r4_treasury_limit_wei": "10000000000000000000"
+  },
+  "state": {
+    "accounts": {
+      "0x7000000000000000000000000000000000000c01": {"balance": "5000000000000000000000", "nonce": 41}
+    }
+  },
+  "requests": [
+    {
+      "t": 0,
+      "label": "50 ETH to an unknown address",
+      "expect": {"verdict": "BLOCK", "rules": ["R5"]},
+      "request": {
+        "wallet_type": "treasury", "chain_id": 1,
+        "from": "0x7000000000000000000000000000000000000c01",
+        "to": "0xbad0000000000000000000000000000000000c01",
+        "data": "0x", "value": "50000000000000000000"
+      }
+    }
+  ]
+}

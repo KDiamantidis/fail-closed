@@ -4,8 +4,9 @@ decode -> request/history rules -> route (fast / slow / early) -> decide() -> hi
 -> breaker effects.
 
 Routing:
-- early: the request/history rules already said BLOCK. The sandbox is skipped (it cannot
-  make the verdict any stricter); decide() checks that a BLOCK finding really exists.
+- early: the destination is frozen (F1) or the wallet is paused (F2): a latched breaker
+  stop, so the sandbox is skipped; decide() checks that a BLOCK finding really exists.
+  Every other BLOCK still runs the sandbox, so the verdict comes with evidence.
 - fast: ALL of these hold, else slow:
     customer_hot: native_transfer, or erc20_transfer to a known token; no authorization_list;
                   no request/history finding at all.
@@ -35,6 +36,7 @@ from state_provider import StartingState, StateProvider
 
 log = logging.getLogger(__name__)
 FAST_KINDS = (Kind.NATIVE_TRANSFER, Kind.ERC20_TRANSFER)
+LATCHED = {"F1", "F2"}  # frozen destination / paused wallet: nothing a simulation could change
 
 
 @dataclass
@@ -136,8 +138,10 @@ class Guard:
     def _route(self, tx: TxRequest, d: Decoded, findings, timings) -> tuple[Path, list[str], LLMAssessment | None]:
         s = self.settings
         ids = sorted({f.rule_id for f in findings})
-        if any(f.action is Decision.BLOCK for f in findings):
-            return Path.EARLY, [f"request/history rules already BLOCK ({', '.join(ids)}); sandbox not needed"], None
+        latched = sorted({f.rule_id for f in findings if f.rule_id in LATCHED and f.action is Decision.BLOCK})
+        if latched:
+            return Path.EARLY, [f"latched breaker ({', '.join(latched)}): destination frozen or wallet paused; "
+                                "sandbox not needed"], None
 
         why_not: list[str] = []
         if d.kind not in FAST_KINDS:

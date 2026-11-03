@@ -1,0 +1,31 @@
+{
+  "name": "b_treasury_allowlisted_above_limit",
+  "title": "(b) Treasury: allowlisted destination, amount above limit",
+  "description": "A known destination, but more than the treasury limit (10 ETH): a human confirms.",
+  "labels": {
+    "0x7000000000000000000000000000000000000b01": "treasury wallet",
+    "0x5afe000000000000000000000000000000000b01": "exchange cold storage (allowlisted)"
+  },
+  "policy": {
+    "treasury_allowlist": ["0x5afe000000000000000000000000000000000b01"],
+    "r4_treasury_limit_wei": "10000000000000000000"
+  },
+  "state": {
+    "accounts": {
+      "0x7000000000000000000000000000000000000b01": {"balance": "5000000000000000000000", "nonce": 40}
+    }
+  },
+  "requests": [
+    {
+      "t": 0,
+      "label": "50 ETH to allowlisted cold storage",
+      "expect": {"verdict": "NEEDS_HUMAN", "rules": ["R4"]},
+      "request": {
+        "wallet_type": "treasury", "chain_id": 1,
+        "from": "0x7000000000000000000000000000000000000b01",
+        "to": "0x5afe000000000000000000000000000000000b01",
+        "data": "0x", "value": "50000000000000000000"
+      }
+    }
+  ]
+}

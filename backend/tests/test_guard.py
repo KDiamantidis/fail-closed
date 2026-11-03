@@ -166,11 +166,11 @@ def test_treasury_allowlisted_above_limit_needs_human():
     assert [f.rule_id for f in r.verdict.findings] == ["R4"]
 
 
-def test_treasury_unknown_destination_above_limit_is_early_block():
+def test_treasury_unknown_destination_above_limit_blocks_with_sandbox_evidence():
     g = guard()
     r = g.check(treas(to=ATT, value=20 * ETH))
-    assert (r.verdict.verdict, r.verdict.path) == (Decision.BLOCK, Path.EARLY)
-    assert g.runner.calls == 0
+    assert (r.verdict.verdict, r.verdict.path) == (Decision.BLOCK, Path.SLOW)
+    assert g.runner.calls == 1  # only a latched freeze/pause skips the sandbox
     assert "R5" in {f.rule_id for f in r.verdict.findings}
 
 
