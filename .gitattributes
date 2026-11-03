@@ -1,0 +1,9 @@
+# Linux containers and the VM need LF. Never let Windows checkouts turn these into CRLF.
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+Dockerfile text eol=lf
+*.sol text eol=lf
+*.png binary
+*.jpg binary
+*.ico binary

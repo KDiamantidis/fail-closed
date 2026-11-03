@@ -1,7 +1,7 @@
 [project]
 name = "fail-closed"
 version = "0.1.0"
-description = "Signing Guard: simulate an EVM transaction in a sandbox before you sign it. Fails closed."
+description = "Signing Guard: an independent co-signer that checks a signing request before the signer signs."
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -23,10 +23,11 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["app", "sandbox", "policies", "agent"]
+packages = ["app", "policies"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = [
     "docker: needs a running Docker daemon and the sandbox image (skipped otherwise)",
 ]
