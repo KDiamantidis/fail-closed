@@ -142,7 +142,9 @@ Python + FastAPI · Docker · Foundry (Anvil, Prague hardfork) · Vultr Serverle
 - Fail Closed does not stop the first break-in (for example a stolen laptop). It stops that break-in from getting a signature.
 - This is a hackathon prototype. The demo uses a local test chain with fake funds, not mainnet.
 - The API runs on the host and needs Docker access, which is root-equivalent with normal Docker. Production setup: rootless Docker for the API user with cgroup v2 delegation, otherwise sandbox memory / CPU / pids limits are not enforced. Red-team fork-bomb and memory tests must prove the limits hold.
-- Unsigned EIP-7702 authorizations can only be simulated for sandbox test accounts (they are signed inside the sandbox with the public Anvil test keys). Pre-signed authorizations are not supported yet; both cases fail closed (BLOCK).
+- EIP-7702 for real wallets is simulated by its effect (delegation code + nonce bump, following the EIP-7702 nonce rules), because the Guard has no wallet keys and is asked before the signature exists. A test proves it gives the same diff as a real type-4 transaction for test accounts. Pre-signed authorizations must name their authority (no signature recovery yet), otherwise BLOCK.
+- The mock signer signs the request hash with a public Anvil demo key to show the flow; it does not produce a broadcastable transaction.
+- The Guard key file is checked for owner-only permissions on Linux/macOS (the VM); on Windows the check is skipped.
 
 ## How to run
 
@@ -190,6 +192,39 @@ Real sandbox tests (need Docker and the sandbox image; skipped otherwise):
 ```sh
 cd backend && .venv/bin/python -m pytest -m docker   # Windows: .venv\Scripts\python -m pytest -m docker
 ```
+
+## API
+
+Runs on the host (not in a container), so it can start sandbox containers itself.
+
+```sh
+cp .env.example .env            # set ADMIN_TOKEN; VULTR_INFERENCE_API_KEY optional (mock without it)
+cd backend
+.venv/bin/python -m uvicorn app.api:app --host 127.0.0.1 --port 8000
+# Windows: .venv\Scripts\python -m uvicorn app.api:app --host 127.0.0.1 --port 8000
+curl -X POST localhost:8000/scenarios/d_binance_7702/run      # one demo scenario
+curl -N localhost:8000/stream                                 # live events (SSE)
+```
+
+| Endpoint | What |
+|---|---|
+| `POST /check` | Check a request: verdict, findings, path + reasons, timings, AI result; approval if ALLOW. Bad input or missing `wallet_type`: 422 |
+| `POST /withdraw` | Demo flow: withdrawal service → Guard → approval → mock signer; returns signed or refused with the reason |
+| `GET /history?limit=50` | Past checks, newest first |
+| `GET /breaker` | Frozen destinations, paused wallets, breaker events |
+| `POST /breaker/reset` | `{"address": …}` or `{"wallet": …}`, header `X-Admin-Token` (401 without, 403 wrong) |
+| `GET /stream` | Server-Sent Events, one per step: received, decoded, request_rules, path, sandbox_started, sandbox_done, findings, verdict, approval, signer |
+| `GET /events?after=` | The same events as JSON, to catch up |
+| `GET /scenarios`, `POST /scenarios/{name}/run` | Demo scenarios, run through `/withdraw` |
+| `GET /guard/public-key`, `GET /health` | The Guard's ed25519 public key; status |
+
+### Approval and signer
+
+1. The Guard has its own ed25519 key (no wallet keys). It is created on first start outside the repo, owner-only, and never enters the sandbox.
+2. Every request is hashed in one canonical form (all fields, sorted keys, lowercase hex, decimal integers): change any field and the hash changes.
+3. Only an ALLOW verdict gets an approval: the Guard signs `{request_hash, verdict, expiry, approval_id}`.
+4. The signer knows only the Guard's public key. It signs only if the approval is valid, matches exactly this request, is not expired and was never used before.
+5. Anything else is refused with a reason. No approval, no signature.
 
 ## Future work
 
