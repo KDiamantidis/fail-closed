@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     r7_freeze_chains: int = 5
     r8_window_minutes: int = 30
     r8_freeze_assets: int = 10
+    # Circuit breaker level 3 (safe mode on one chain): starting values
+    safe_mode_paused_wallets: int = 2  # wallets paused by checks on the chain within the window
+    safe_mode_evidence_blocks: int = 3  # R1/R2/R3-evidence BLOCKs on the chain within the window
+    safe_mode_window_minutes: int = 60
+    # Level 4 (global stop) needs at least this many independent signals
+    global_stop_signals: int = 2
 
     @field_validator("known_tokens", "delegate_allowlist", "treasury_allowlist")
     @classmethod

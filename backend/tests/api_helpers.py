@@ -63,7 +63,7 @@ def make_services(tmp_path, runner=None, admin_token=ADMIN, clock=None, gate=Non
 
     guard = Guard(s, history, StaticStateProvider(merged_state(scenarios)),
                   runner if runner is not None else SandboxRunner(s), LLMExplainer(s),
-                  breaker=Breaker(history), events=bus.publish, gate=gate or SandboxGate(4, 10),
+                  breaker=Breaker(history, s), events=bus.publish, gate=gate or SandboxGate(4, 10),
                   **({"clock": clock} if clock else {}))
     key = GuardKey.load_or_create(tmp_path / "keys" / "guard.pem")
     return Services(s, guard, history, Approver(key, 120), MockSigner(key.public_key_hex), bus, SCENARIOS)

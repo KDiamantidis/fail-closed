@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import Settings
 from app.models import TxRequest
@@ -26,18 +26,52 @@ class Expect(BaseModel):
     rules: list[str] = Field(default_factory=list)  # must all be present
     wallet_paused: bool | None = None  # state of the sender's pause after this request
     after_hold: str | None = None  # DELAY / NEEDS_HUMAN: outcome after the worker (released | blocked)
+    safe_mode_chains: list[int] | None = None  # breaker level 3 state after this step
+    global_stop: bool | None = None  # breaker level 4 state after this step
+
+
+ACTIONS = ("reset_destination", "reset_wallet", "reset_safe_mode", "reset_global")
 
 
 class ScenarioRequest(BaseModel):
+    """One step: a request from the (untrusted) withdrawal service, or a human breaker action."""
+
     model_config = ConfigDict(extra="forbid")
 
     t: float = 0.0
     label: str
-    request: dict[str, Any]
+    request: dict[str, Any] | None = None
+    action: str | None = None  # one of ACTIONS (an admin resetting the breaker)
+    target: str | int | None = None  # address, wallet or chain id for the action
+    actor: str = "ops"
     expect: Expect = Field(default_factory=Expect)
 
+    @model_validator(mode="after")
+    def _one_kind(self) -> "ScenarioRequest":
+        if (self.request is None) == (self.action is None):
+            raise ValueError("a step has exactly one of request or action")
+        if self.action is not None and self.action not in ACTIONS:
+            raise ValueError(f"unknown action {self.action}")
+        return self
+
+    @property
+    def is_action(self) -> bool:
+        return self.action is not None
+
     def tx(self) -> TxRequest:
+        if self.request is None:
+            raise ValueError(f"step '{self.label}' is an action, not a request")
         return TxRequest.model_validate(self.request)
+
+    def apply(self, breaker: Any, now: float) -> bool:
+        """Perform a human breaker action (logged with the actor)."""
+        if self.action == "reset_destination":
+            return breaker.reset_destination(str(self.target), self.actor, now)
+        if self.action == "reset_wallet":
+            return breaker.reset_wallet(str(self.target), self.actor, now)
+        if self.action == "reset_safe_mode":
+            return breaker.reset_safe_mode(int(self.target), self.actor, now)
+        return breaker.reset_global(self.actor, now)
 
 
 class Scenario(BaseModel):

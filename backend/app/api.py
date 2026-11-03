@@ -58,13 +58,18 @@ class DecisionRequest(BaseModel):
 
 
 class ResetRequest(BaseModel):
-    address: str | None = None
-    wallet: str | None = None
+    address: str | None = None  # level 1: unfreeze a destination
+    wallet: str | None = None  # level 2: unpause a wallet
+    chain_id: int | None = None  # level 3: end safe mode on a chain
+    global_stop: bool | None = None  # level 4: lift the global stop
+    actor: str = "api-admin"
 
     @model_validator(mode="after")
     def _one(self) -> "ResetRequest":
-        if (self.address is None) == (self.wallet is None):
-            raise ValueError("give exactly one of address or wallet")
+        given = [self.address is not None, self.wallet is not None, self.chain_id is not None,
+                 bool(self.global_stop)]
+        if sum(given) != 1:
+            raise ValueError("give exactly one of address, wallet, chain_id or global_stop")
         return self
 
 
@@ -105,7 +110,7 @@ class Services:
         self.settings, self.guard, self.history = settings, guard, history
         self.approver, self.signer, self.bus, self.scenarios_dir = approver, signer, bus, scenarios_dir
         self.run_id = run_id
-        self.breaker = Breaker(history)
+        self.breaker = Breaker(history, settings)
         self.holds = HoldManager(guard, approver, signer, publish=self.publish)
         self.redteam_lock = threading.Lock()  # one red-team run at a time
         self.loadtest_lock = threading.Lock()  # one load demo at a time
@@ -125,7 +130,7 @@ class Services:
         history = History(":memory:")
         g = self.guard
         guard = Guard(g.settings, history, g.state_provider, g.runner, g.explainer,
-                      breaker=Breaker(history), clock=g.clock, perf=g.perf,
+                      breaker=Breaker(history, g.settings), clock=g.clock, perf=g.perf,
                       events=lambda cid, kind, data: self.bus.publish(cid, kind, data, run_id=run_id),
                       gate=g.gate)
         signer = MockSigner(self.signer.guard_public_key_hex, ReplayStore(":memory:"), clock=self.signer.clock)
@@ -140,7 +145,7 @@ class Services:
         history = History(settings.history_db)
         bus = EventBus()
         guard = Guard(settings, history, StaticStateProvider(merged_state(scenarios)),
-                      SandboxRunner(settings), LLMExplainer(settings), breaker=Breaker(history),
+                      SandboxRunner(settings), LLMExplainer(settings), breaker=Breaker(history, settings),
                       events=lambda cid, kind, data: bus.publish(cid, kind, data, run_id="main"),
                       gate=SandboxGate(settings.sandbox_max_concurrent, settings.sandbox_queue_seconds))
         key = GuardKey.load_or_create(settings.guard_key_path)
@@ -228,8 +233,7 @@ def create_app(services: Services | None = None) -> FastAPI:
 
     @app.get("/breaker")
     def breaker() -> dict:
-        return {"frozen_destinations": svc.history.frozen(), "paused_wallets": svc.history.paused(),
-                "events": svc.history.events()[-50:]}
+        return {**svc.breaker.state(), "signals": svc.breaker.signals(), "events": svc.history.events()[-50:]}
 
     def require_admin(token: str | None) -> None:
         expected = svc.settings.admin_token
@@ -285,6 +289,7 @@ def create_app(services: Services | None = None) -> FastAPI:
                 report = svc.make_redteam(probe).run(on_result=on_result)
                 report["run_id"] = run_id
                 svc.history.save_redteam(run_id, report["finished"], report)
+                svc.breaker.evaluate_global(report["finished"])  # a RED payload is a level-4 signal
                 done = {"run_id": run_id, "all_contained": report["all_contained"], "red": report["red"]}
                 svc.bus.publish("-", "redteam_finished", done, run_id=run_id)
                 loop.call_soon_threadsafe(queue.put_nowait, ("redteam_finished", done))
@@ -360,13 +365,19 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.post("/breaker/reset")
     def reset(body: ResetRequest, x_admin_token: str | None = Header(default=None)) -> dict:
         require_admin(x_admin_token)
-        now = time.time()
+        now, actor = time.time(), body.actor
         if body.address:
-            ok = svc.breaker.reset_destination(body.address, actor="api-admin", now=now)
-            target = {"address": body.address.lower()}
-        else:
-            ok = svc.breaker.reset_wallet(body.wallet, actor="api-admin", now=now)
+            ok = svc.breaker.reset_destination(body.address, actor=actor, now=now)
+            target: dict = {"address": body.address.lower()}
+        elif body.wallet:
+            ok = svc.breaker.reset_wallet(body.wallet, actor=actor, now=now)
             target = {"wallet": body.wallet.lower()}
+        elif body.chain_id is not None:
+            ok = svc.breaker.reset_safe_mode(body.chain_id, actor=actor, now=now)
+            target = {"chain_id": body.chain_id}
+        else:
+            ok = svc.breaker.reset_global(actor=actor, now=now)
+            target = {"global_stop": True}
         return {"reset": ok, **target, "detail": "reset and logged" if ok else "nothing to reset"}
 
     @app.get("/events")
@@ -433,8 +444,17 @@ def create_app(services: Services | None = None) -> FastAPI:
         results = []
         try:
             for r in sc.requests:
+                if r.is_action:  # a scripted human reset, on this run's own breaker
+                    done = r.apply(iso.breaker, time.time())
+                    iso.publish("-", "human_action", {"action": r.action, "target": r.target, "by": r.actor,
+                                                      "done": done})
+                    results.append({"label": r.label, "expect": r.expect.model_dump(), "action": r.action,
+                                    "target": r.target, "by": r.actor, "done": done,
+                                    "breaker": iso.breaker.state()})
+                    continue
                 out = iso.withdraw(r.tx())
-                results.append({"label": r.label, "expect": r.expect.model_dump(), **out})
+                results.append({"label": r.label, "expect": r.expect.model_dump(), **out,
+                                "breaker_state": iso.breaker.state()})
         except GuardBusy as e:
             raise HTTPException(status_code=503, detail=f"Guard busy: {e}. Nothing was approved or signed.")
         # Demo: fast-forward the clock past the DELAY so the visitor sees what the worker decides.
@@ -443,7 +463,7 @@ def create_app(services: Services | None = None) -> FastAPI:
         iso.publish("-", "run_finished", {"scenario": name, "delay_worker": len(released)})
         return {"name": name, "title": sc.title, "run_id": run_id, "results": results,
                 "delay_worker": {"ran_at": f"+{svc.settings.delay_minutes} min (simulated)", "results": released},
-                "breaker": {"frozen_destinations": iso.history.frozen(), "paused_wallets": iso.history.paused()}}
+                "breaker": iso.breaker.state()}
 
     return app
 

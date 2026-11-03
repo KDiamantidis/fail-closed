@@ -80,13 +80,22 @@ def lab(sc: Scenario, addr: str) -> str:
     return f"{addr} ({name})" if name else addr
 
 
-def expect_status(r: ScenarioRequest, res: CheckResult, history: History | None = None) -> str:
-    v = res.verdict
+def expect_status(r: ScenarioRequest, res: CheckResult | None, history: History | None = None) -> str:
     problems = []
-    if r.expect.wallet_paused is not None and history is not None:
-        paused = history.is_paused(r.tx().from_) is not None
-        if paused != r.expect.wallet_paused:
-            problems.append(f"wallet paused={paused}, expected {r.expect.wallet_paused}")
+    if history is not None:
+        if r.expect.wallet_paused is not None and not r.is_action:
+            paused = history.is_paused(r.tx().from_) is not None
+            if paused != r.expect.wallet_paused:
+                problems.append(f"wallet paused={paused}, expected {r.expect.wallet_paused}")
+        if r.expect.safe_mode_chains is not None:
+            chains = sorted(m["chain_id"] for m in history.safe_modes())
+            if chains != sorted(r.expect.safe_mode_chains):
+                problems.append(f"safe mode chains {chains} != {sorted(r.expect.safe_mode_chains)}")
+        if r.expect.global_stop is not None and (history.global_stop() is not None) != r.expect.global_stop:
+            problems.append(f"global stop {history.global_stop() is not None} != {r.expect.global_stop}")
+    if res is None:  # an action step: only the breaker expectations apply
+        return "OK" if not problems else "MISMATCH: " + "; ".join(problems)
+    v = res.verdict
     if r.expect.verdict and v.verdict.value != r.expect.verdict:
         problems.append(f"verdict {v.verdict.value} != {r.expect.verdict}")
     if r.expect.path and (v.path.value if v.path else None) != r.expect.path:
@@ -102,7 +111,7 @@ def expect_status(r: ScenarioRequest, res: CheckResult, history: History | None 
 def make_guard(sc: Scenario, base: Settings, history: History, clock: dict) -> Guard:
     s = sc.settings(base)
     return Guard(s, history, ScenarioStateProvider(sc.path), SandboxRunner(s), LLMExplainer(s),
-                 breaker=Breaker(history), clock=lambda: clock["now"])
+                 breaker=Breaker(history, s), clock=lambda: clock["now"])
 
 
 def fresh_history(db: str) -> History:
@@ -117,6 +126,13 @@ def run_file(sc: Scenario, guard: Guard, clock: dict, base_t: float, report: boo
     results = []
     for i, r in enumerate(sc.requests, 1):
         clock["now"] = base_t + r.t
+        if r.is_action:  # a human resetting the breaker
+            done = r.apply(guard.breaker, clock["now"])
+            status = expect_status(r, None, guard.history)
+            results.append((r, None, status))
+            if report:
+                print_action(i, len(sc.requests), r, done, guard.history, status)
+            continue
         res = guard.check(r.tx())
         status = expect_status(r, res, guard.history)
         results.append((r, res, status))
@@ -125,12 +141,22 @@ def run_file(sc: Scenario, guard: Guard, clock: dict, base_t: float, report: boo
     return results
 
 
+def print_action(i: int, n: int, r: ScenarioRequest, done: bool, history: History, status: str) -> None:
+    print("=" * 86)
+    print(f" step {i}/{n}: HUMAN ACTION by {r.actor}: {r.label}")
+    print("=" * 86)
+    print(f"action  : {r.action}{f' {r.target}' if r.target is not None else ''} -> "
+          f"{'done (logged)' if done else 'nothing to reset'}   ({status})")
+    print_breaker(history)
+    print("")
+
+
 def blast_radius(history: History, sc: Scenario) -> list[str]:
     """For each frozen destination in this scenario: value that was ALLOWed to it before the
     freeze (and value held by DELAY, which the freeze keeps from being released)."""
     lines = []
-    addrs = {r.tx().to for r in sc.requests} | {
-        "0x" + r.tx().data[34:74] for r in sc.requests if r.tx().data.startswith("0xa9059cbb")}
+    txs = [r.tx() for r in sc.requests if not r.is_action]
+    addrs = {t.to for t in txs} | {"0x" + t.data[34:74] for t in txs if t.data.startswith("0xa9059cbb")}
     for row in history.frozen():
         addr = row["address"]
         if addr not in addrs:
@@ -169,7 +195,7 @@ def blast_radius(history: History, sc: Scenario) -> list[str]:
 def run_delay_worker(sc: Scenario, guard: Guard, results: list, base_t: float) -> tuple[list, list[str]]:
     """Run the DELAY worker once, DELAY_MINUTES after the scenario's last request, and check
     each `after_hold` expectation. Uses a throwaway approval key: this is a local CLI run."""
-    if not any(res.verdict.verdict is Decision.DELAY for _, res, _ in results):
+    if not any(res is not None and res.verdict.verdict is Decision.DELAY for _, res, _ in results):
         return results, []
     later = base_t + max(r.t for r in sc.requests) + guard.settings.delay_minutes * 60 + 1
     key = GuardKey(Ed25519PrivateKey.generate())
@@ -179,7 +205,7 @@ def run_delay_worker(sc: Scenario, guard: Guard, results: list, base_t: float) -
     lines = [f"DELAY worker for {sc.name}, at +{guard.settings.delay_minutes} min after the last request:"]
     checked = []
     for r, res, status in results:
-        d = outcome.get(res.check_id)
+        d = outcome.get(res.check_id) if res is not None else None
         if d is not None:
             idx = sc.requests.index(r) + 1
             lines.append(f"  #{idx} {r.label}: {d['status'].upper()}, signed={d['signed']}")
@@ -220,10 +246,15 @@ def cmd_run_all(directory: Path, db: str) -> int:
     print("-" * len(head))
     last = None
     for sc, r, res, status in rows:
-        v = res.verdict
-        rules = ",".join(dict.fromkeys(f.rule_id for f in v.findings if f.action is not Decision.ALLOW)) or "-"
         name = sc.name if sc.name != last else ""
         idx = sc.requests.index(r) + 1
+        if res is None:  # a human breaker action
+            print(f"{name:<34} {idx:>2}  {('HUMAN: ' + r.label)[:44]:<44} {'-':<5} {r.action[:11]:<11} "
+                  f"{'-':<16} {'':>6}  {status}")
+            last = sc.name
+            continue
+        v = res.verdict
+        rules = ",".join(dict.fromkeys(f.rule_id for f in v.findings if f.action is not Decision.ALLOW)) or "-"
         print(f"{name:<34} {idx:>2}  {r.label[:44]:<44} {v.path.value if v.path else '-':<5} "
               f"{v.verdict.value:<11} {rules:<16} {res.timings.get('total', 0) * 1000:6.0f}  {status}")
         for a in res.breaker_actions:
@@ -391,6 +422,7 @@ def print_check(sc: Scenario, i: int, r: ScenarioRequest, res: CheckResult, guar
 
 def print_breaker(history: History) -> None:
     frozen, paused = history.frozen(), history.paused()
+    safe, stop = history.safe_modes(), history.global_stop()
     print("--- circuit breaker (latched until a human resets) ---")
     print(f"frozen destinations (level 1): {len(frozen)}")
     for r in frozen:
@@ -398,6 +430,10 @@ def print_breaker(history: History) -> None:
     print(f"paused wallets (level 2): {len(paused)}")
     for r in paused:
         print(f"  {r['wallet']}  {r['reason']}")
+    print(f"safe mode chains (level 3): {len(safe)}")
+    for r in safe:
+        print(f"  chain {r['chain_id']}  {r['reason']}")
+    print(f"global stop (level 4): {'ON - ' + stop['reason'] if stop else 'off'}")
 
 
 def print_redteam_row(r: dict) -> None:
@@ -437,16 +473,23 @@ def cmd_loadtest(args) -> int:
     return 0 if all(r["attacks_stopped"] == r["attacks"] for r in results) else 1
 
 
-def cmd_reset(db: str, address: str | None, wallet: str | None, actor: str) -> int:
+def cmd_reset(db: str, address: str | None, wallet: str | None, actor: str,
+              chain: int | None = None, global_stop: bool = False) -> int:
     h = History(db)
     b = Breaker(h)
     now = time.time()
     if address:
         ok = b.reset_destination(address, actor=actor, now=now)
         print(f"{'reset' if ok else 'not frozen'}: destination {address.lower()} (by {actor}, logged)")
-    else:
+    elif wallet:
         ok = b.reset_wallet(wallet, actor=actor, now=now)
         print(f"{'reset' if ok else 'not paused'}: wallet {wallet.lower()} (by {actor}, logged)")
+    elif chain is not None:
+        ok = b.reset_safe_mode(chain, actor=actor, now=now)
+        print(f"{'reset' if ok else 'not in safe mode'}: chain {chain} (by {actor}, logged)")
+    else:
+        ok = b.reset_global(actor=actor, now=now)
+        print(f"{'reset' if ok else 'not active'}: global stop (by {actor}, logged)")
     print_breaker(h)
     return 0 if ok else 1
 
@@ -468,6 +511,8 @@ def main(argv: list[str] | None = None) -> int:
     target = rs.add_mutually_exclusive_group(required=True)
     target.add_argument("--address", help="unfreeze a destination address (level 1)")
     target.add_argument("--wallet", help="unpause a wallet (level 2)")
+    target.add_argument("--chain", type=int, help="end safe mode on a chain (level 3)")
+    target.add_argument("--global", dest="global_stop", action="store_true", help="lift the global stop (level 4)")
     rs.add_argument("--actor", default="cli", help="who resets (written to the log)")
     rs.add_argument("--db", default=None, help="history database (default: HISTORY_DB)")
     br = sub.add_parser("breaker", help="show frozen destinations and paused wallets")
@@ -493,7 +538,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "scenario":
         return cmd_scenario(args.path, args.db)
     if args.cmd == "reset":
-        return cmd_reset(args.db or get_settings().history_db, args.address, args.wallet, args.actor)
+        return cmd_reset(args.db or get_settings().history_db, args.address, args.wallet, args.actor,
+                         args.chain, args.global_stop)
     if args.cmd == "breaker":
         print_breaker(History(args.db or get_settings().history_db))
         return 0

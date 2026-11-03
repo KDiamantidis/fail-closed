@@ -1,0 +1,343 @@
+{
+  "name": "g_coordinated_breaker",
+  "title": "(g) Coordinated attack on several wallets and chains: breaker level 1 -> 2 -> 3 -> 4, then admin reset",
+  "description": "A multi-chain drain to one address freezes it (level 1). Four hot wallets are asked to delegate to a sweeper; each is paused (level 2). Two paused wallets on chain 1 put chain 1 in safe mode (level 3): a normal withdrawal there needs a human. Two more on chain 10 put chain 10 in safe mode too: two independent signals trigger the global stop (level 4), and even a normal withdrawal on another chain is blocked. An ops lead reviews and resets, and normal service resumes.",
+  "labels": {
+    "0x1000000000000000000000000000000000000701": "hot wallet 1",
+    "0x1000000000000000000000000000000000000706": "hot wallet 6 (customers)",
+    "0xbad0000000000000000000000000000000000701": "attacker address",
+    "0xc000000000000000000000000000000000000701": "customer",
+    "0xc000000000000000000000000000000000000702": "another customer",
+    "0x00000000000000000000000000000000005eeeee": "MockSweeper",
+    "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc": "attacker (hard-coded in sweeper)",
+    "0x1000000000000000000000000000000000000702": "hot wallet 2",
+    "0x1000000000000000000000000000000000000703": "hot wallet 3",
+    "0x1000000000000000000000000000000000000704": "hot wallet 4",
+    "0x1000000000000000000000000000000000000705": "hot wallet 5"
+  },
+  "policy": {},
+  "state": {
+    "accounts": {
+      "0x1000000000000000000000000000000000000701": {
+        "balance": "1000000000000000000000",
+        "nonce": 500
+      },
+      "0x1000000000000000000000000000000000000706": {
+        "balance": "1000000000000000000000",
+        "nonce": 800
+      },
+      "0x00000000000000000000000000000000005eeeee": {
+        "code": "artifact:MockSweeper"
+      },
+      "0x1000000000000000000000000000000000000702": {
+        "balance": "100000000000000000000",
+        "nonce": 10
+      },
+      "0x1000000000000000000000000000000000000703": {
+        "balance": "100000000000000000000",
+        "nonce": 10
+      },
+      "0x1000000000000000000000000000000000000704": {
+        "balance": "100000000000000000000",
+        "nonce": 10
+      },
+      "0x1000000000000000000000000000000000000705": {
+        "balance": "100000000000000000000",
+        "nonce": 10
+      }
+    }
+  },
+  "requests": [
+    {
+      "t": 0,
+      "label": "1 ETH to the attacker on chain 1",
+      "expect": {
+        "verdict": "ALLOW"
+      },
+      "request": {
+        "wallet_type": "customer_hot",
+        "chain_id": 1,
+        "from": "0x1000000000000000000000000000000000000701",
+        "to": "0xbad0000000000000000000000000000000000701",
+        "data": "0x",
+        "value": "1000000000000000000"
+      }
+    },
+    {
+      "t": 60,
+      "label": "1 ETH to the attacker on chain 10",
+      "expect": {
+        "verdict": "ALLOW"
+      },
+      "request": {
+        "wallet_type": "customer_hot",
+        "chain_id": 10,
+        "from": "0x1000000000000000000000000000000000000701",
+        "to": "0xbad0000000000000000000000000000000000701",
+        "data": "0x",
+        "value": "1000000000000000000"
+      }
+    },
+    {
+      "t": 120,
+      "label": "1 ETH to the attacker on chain 42161",
+      "expect": {
+        "verdict": "DELAY",
+        "after_hold": "blocked"
+      },
+      "request": {
+        "wallet_type": "customer_hot",
+        "chain_id": 42161,
+        "from": "0x1000000000000000000000000000000000000701",
+        "to": "0xbad0000000000000000000000000000000000701",
+        "data": "0x",
+        "value": "1000000000000000000"
+      }
+    },
+    {
+      "t": 180,
+      "label": "1 ETH to the attacker on chain 137",
+      "expect": {
+        "verdict": "DELAY",
+        "after_hold": "blocked"
+      },
+      "request": {
+        "wallet_type": "customer_hot",
+        "chain_id": 137,
+        "from": "0x1000000000000000000000000000000000000701",
+        "to": "0xbad0000000000000000000000000000000000701",
+        "data": "0x",
+        "value": "1000000000000000000"
+      }
+    },
+    {
+      "t": 240,
+      "label": "1 ETH to the attacker on chain 43114",
+      "expect": {
+        "verdict": "BLOCK",
+        "rules": [
+          "R7"
+        ]
+      },
+      "request": {
+        "wallet_type": "customer_hot",
+        "chain_id": 43114,
+        "from": "0x1000000000000000000000000000000000000701",
+        "to": "0xbad0000000000000000000000000000000000701",
+        "data": "0x",
+        "value": "1000000000000000000"
+      }
+    },
+    {
+      "t": 300,
+      "label": "hot wallet 2 asked to delegate to the sweeper (chain 1)",
+      "expect": {
+        "verdict": "BLOCK",
+        "path": "slow",
+        "rules": [
+          "R1",
+          "R3"
+        ],
+        "wallet_paused": true,
+        "safe_mode_chains": []
+      },
+      "request": {
+        "wallet_type": "customer_hot",
+        "chain_id": 1,
+        "from": "0x1000000000000000000000000000000000000702",
+        "to": "0x1000000000000000000000000000000000000702",
+        "data": "0x",
+        "value": "0",
+        "authorization_list": [
+          {
+            "chain_id": 1,
+            "address": "0x00000000000000000000000000000000005eeeee",
+            "nonce": 11
+          }
+        ]
+      }
+    },
+    {
+      "t": 360,
+      "label": "hot wallet 3 asked to delegate to the sweeper (chain 1)",
+      "expect": {
+        "verdict": "BLOCK",
+        "rules": [
+          "R1",
+          "R3"
+        ],
+        "wallet_paused": true,
+        "safe_mode_chains": [
+          1
+        ],
+        "global_stop": false
+      },
+      "request": {
+        "wallet_type": "customer_hot",
+        "chain_id": 1,
+        "from": "0x1000000000000000000000000000000000000703",
+        "to": "0x1000000000000000000000000000000000000703",
+        "data": "0x",
+        "value": "0",
+        "authorization_list": [
+          {
+            "chain_id": 1,
+            "address": "0x00000000000000000000000000000000005eeeee",
+            "nonce": 11
+          }
+        ]
+      }
+    },
+    {
+      "t": 420,
+      "label": "normal customer withdrawal on chain 1 (safe mode)",
+      "expect": {
+        "verdict": "NEEDS_HUMAN",
+        "path": "slow",
+        "rules": [
+          "F3"
+        ]
+      },
+      "request": {
+        "wallet_type": "customer_hot",
+        "chain_id": 1,
+        "from": "0x1000000000000000000000000000000000000706",
+        "to": "0xc000000000000000000000000000000000000701",
+        "data": "0x",
+        "value": "1000000000000000000"
+      }
+    },
+    {
+      "t": 480,
+      "label": "hot wallet 4 asked to delegate to the sweeper (chain 10)",
+      "expect": {
+        "verdict": "BLOCK",
+        "rules": [
+          "R1",
+          "R3"
+        ],
+        "wallet_paused": true,
+        "safe_mode_chains": [
+          1
+        ]
+      },
+      "request": {
+        "wallet_type": "customer_hot",
+        "chain_id": 10,
+        "from": "0x1000000000000000000000000000000000000704",
+        "to": "0x1000000000000000000000000000000000000704",
+        "data": "0x",
+        "value": "0",
+        "authorization_list": [
+          {
+            "chain_id": 10,
+            "address": "0x00000000000000000000000000000000005eeeee",
+            "nonce": 11
+          }
+        ]
+      }
+    },
+    {
+      "t": 540,
+      "label": "hot wallet 5 asked to delegate to the sweeper (chain 10)",
+      "expect": {
+        "verdict": "BLOCK",
+        "rules": [
+          "R1",
+          "R3"
+        ],
+        "safe_mode_chains": [
+          1,
+          10
+        ],
+        "global_stop": true
+      },
+      "request": {
+        "wallet_type": "customer_hot",
+        "chain_id": 10,
+        "from": "0x1000000000000000000000000000000000000705",
+        "to": "0x1000000000000000000000000000000000000705",
+        "data": "0x",
+        "value": "0",
+        "authorization_list": [
+          {
+            "chain_id": 10,
+            "address": "0x00000000000000000000000000000000005eeeee",
+            "nonce": 11
+          }
+        ]
+      }
+    },
+    {
+      "t": 600,
+      "label": "normal customer withdrawal on chain 137 (global stop)",
+      "expect": {
+        "verdict": "BLOCK",
+        "path": "early",
+        "rules": [
+          "F4"
+        ]
+      },
+      "request": {
+        "wallet_type": "customer_hot",
+        "chain_id": 137,
+        "from": "0x1000000000000000000000000000000000000706",
+        "to": "0xc000000000000000000000000000000000000702",
+        "data": "0x",
+        "value": "1000000000000000000"
+      }
+    },
+    {
+      "t": 660,
+      "label": "ops lead lifts the global stop after review",
+      "action": "reset_global",
+      "actor": "ops-lead",
+      "expect": {
+        "global_stop": false,
+        "safe_mode_chains": [
+          1,
+          10
+        ]
+      }
+    },
+    {
+      "t": 720,
+      "label": "ops lead ends safe mode on chain 1",
+      "action": "reset_safe_mode",
+      "target": 1,
+      "actor": "ops-lead",
+      "expect": {
+        "safe_mode_chains": [
+          10
+        ]
+      }
+    },
+    {
+      "t": 780,
+      "label": "ops lead ends safe mode on chain 10",
+      "action": "reset_safe_mode",
+      "target": 10,
+      "actor": "ops-lead",
+      "expect": {
+        "safe_mode_chains": [],
+        "global_stop": false
+      }
+    },
+    {
+      "t": 840,
+      "label": "normal customer withdrawal on chain 137 after the reset",
+      "expect": {
+        "verdict": "ALLOW",
+        "path": "fast"
+      },
+      "request": {
+        "wallet_type": "customer_hot",
+        "chain_id": 137,
+        "from": "0x1000000000000000000000000000000000000706",
+        "to": "0xc000000000000000000000000000000000000702",
+        "data": "0x",
+        "value": "1000000000000000000"
+      }
+    }
+  ]
+}

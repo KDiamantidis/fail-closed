@@ -37,7 +37,7 @@ from state_provider import StartingState, StateProvider
 
 log = logging.getLogger(__name__)
 FAST_KINDS = (Kind.NATIVE_TRANSFER, Kind.ERC20_TRANSFER)
-LATCHED = {"F1", "F2"}  # frozen destination / paused wallet: nothing a simulation could change
+LATCHED = {"F1", "F2", "F4"}  # frozen destination / paused wallet / global stop: nothing a simulation could change
 
 
 @dataclass

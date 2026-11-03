@@ -47,6 +47,29 @@ def f2_paused_wallet(ctx: RuleContext) -> list[Finding]:
     return findings
 
 
+def f3_safe_mode_chain(ctx: RuleContext) -> list[Finding]:
+    """Breaker level 3: the chain is in safe mode. Every request there needs a human (and is
+    still checked in the sandbox: a finding means no fast path)."""
+    ctx.need("history")
+    row = ctx.history.is_safe_mode(ctx.tx.chain_id)
+    if row is None:
+        return []
+    return [Finding(rule_id="F3", action=Decision.NEEDS_HUMAN, subject=str(ctx.tx.chain_id),
+                    title=f"Chain {ctx.tx.chain_id} is in safe mode",
+                    detail=f"{row['reason']}. No fast path on this chain; every request needs a human "
+                           "until safe mode is reset.")]
+
+
+def f4_global_stop(ctx: RuleContext) -> list[Finding]:
+    """Breaker level 4: no approvals at all until a human resets it."""
+    ctx.need("history")
+    row = ctx.history.global_stop()
+    if row is None:
+        return []
+    return [Finding(rule_id="F4", action=Decision.BLOCK, title="Global stop",
+                    detail=f"{row['reason']}. No approvals at all until a human resets the global stop.")]
+
+
 def r2_authorizations(ctx: RuleContext) -> list[Finding]:
     auths = ctx.tx.authorization_list or []
     if not auths:
@@ -214,8 +237,10 @@ def c1_customer_shape(ctx: RuleContext) -> list[Finding]:
 
 
 REQUEST_RULES = [
+    f4_global_stop,
     f1_frozen_destination,
     f2_paused_wallet,
+    f3_safe_mode_chain,
     r2_authorizations,
     r3_request_outflow,
     r4_treasury_limit,

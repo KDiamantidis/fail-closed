@@ -41,7 +41,7 @@ def neutral_guard(name):
 
 
 def test_expected_scenarios_exist_in_order():
-    assert [p.stem[:2] for p in FILES] == ["a_", "b_", "c_", "d_", "e_", "f_"]
+    assert [p.stem[:2] for p in FILES] == ["a_", "b_", "c_", "d_", "e_", "f_", "g_"]
 
 
 @pytest.mark.parametrize("path", FILES, ids=lambda p: p.stem)
@@ -50,12 +50,15 @@ def test_scenario_file_is_valid(path):
     settings = sc.settings(Settings(llm_mode="mock"))
     assert sc.requests
     for r in sc.requests:
+        if r.is_action:
+            assert r.expect.verdict is None
+            continue
         tx = r.tx()
         assert r.expect.verdict in VERDICTS
         assert r.expect.path in PATHS | {None}
         assert decode(tx, settings.known_tokens).kind is not None
     # the request never carries state; the state section is Guard-side
-    assert all("state" not in r.request and "balance" not in r.request for r in sc.requests)
+    assert all("state" not in r.request and "balance" not in r.request for r in sc.requests if not r.is_action)
 
 
 def test_mercado_tokens_are_known_transfers():

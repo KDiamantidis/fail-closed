@@ -86,6 +86,20 @@ CREATE TABLE IF NOT EXISTS redteam_reports (
     report TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS safe_mode (
+    chain_id INTEGER PRIMARY KEY,
+    reason   TEXT NOT NULL,
+    ts       REAL NOT NULL,
+    check_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS global_stop (
+    id      INTEGER PRIMARY KEY CHECK (id = 1),
+    reason  TEXT NOT NULL,
+    signals TEXT NOT NULL,
+    ts      REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS breaker_events (
     ts      REAL NOT NULL,
     action  TEXT NOT NULL,
@@ -171,6 +185,47 @@ class History:
                               (now, "pause_wallet", wallet, reason, actor))
             return True
 
+    def enter_safe_mode(self, chain_id: int, reason: str, now: float, check_id: str | None = None,
+                        actor: str = "guard") -> bool:
+        """Level 3, latched. Returns True if the chain was not in safe mode before."""
+        with self.lock, self.conn:
+            cur = self.conn.execute("INSERT OR IGNORE INTO safe_mode VALUES (?,?,?,?)",
+                                    (chain_id, reason, now, check_id))
+            if cur.rowcount != 1:
+                return False
+            self.conn.execute("INSERT INTO breaker_events VALUES (?,?,?,?,?)",
+                              (now, "safe_mode", f"chain {chain_id}", reason, actor))
+            return True
+
+    def exit_safe_mode(self, chain_id: int, actor: str, now: float, reason: str = "manual reset") -> bool:
+        with self.lock, self.conn:
+            cur = self.conn.execute("DELETE FROM safe_mode WHERE chain_id = ?", (chain_id,))
+            if cur.rowcount != 1:
+                return False
+            self.conn.execute("INSERT INTO breaker_events VALUES (?,?,?,?,?)",
+                              (now, "reset_safe_mode", f"chain {chain_id}", reason, actor))
+            return True
+
+    def set_global_stop(self, reason: str, signals: list[str], now: float, actor: str = "guard") -> bool:
+        """Level 4, latched. Returns True if it was not active before."""
+        with self.lock, self.conn:
+            cur = self.conn.execute("INSERT OR IGNORE INTO global_stop VALUES (1,?,?,?)",
+                                    (reason, json.dumps(signals), now))
+            if cur.rowcount != 1:
+                return False
+            self.conn.execute("INSERT INTO breaker_events VALUES (?,?,?,?,?)",
+                              (now, "global_stop", "all approvals", reason, actor))
+            return True
+
+    def clear_global_stop(self, actor: str, now: float, reason: str = "manual reset") -> bool:
+        with self.lock, self.conn:
+            cur = self.conn.execute("DELETE FROM global_stop WHERE id = 1")
+            if cur.rowcount != 1:
+                return False
+            self.conn.execute("INSERT INTO breaker_events VALUES (?,?,?,?,?)",
+                              (now, "reset_global_stop", "all approvals", reason, actor))
+            return True
+
     def unfreeze(self, address: str, actor: str, now: float, reason: str = "manual reset") -> bool:
         with self.lock, self.conn:
             cur = self.conn.execute("DELETE FROM frozen_destinations WHERE address = ?", (address,))
@@ -228,6 +283,34 @@ class History:
         rows = self._rows("SELECT ts, chain_id, asset, amount, verdict FROM checks "
                           "WHERE destination = ? AND amount != '0' ORDER BY ts, rowid", (destination,))
         return [{**dict(r), "amount": int(r["amount"])} for r in rows]
+
+    def paused_wallets_on_chain(self, chain_id: int, since: float) -> list[str]:
+        """Wallets paused (still paused) by a check on this chain within the window."""
+        rows = self._rows("SELECT DISTINCT p.wallet FROM paused_wallets p JOIN checks c ON p.check_id = c.id "
+                          "WHERE c.chain_id = ? AND p.ts >= ?", (chain_id, since))
+        return [r["wallet"] for r in rows]
+
+    def evidence_blocks(self, chain_id: int, since: float) -> int:
+        """BLOCKs on this chain with R1, R2 or R3 BLOCK findings (sandbox evidence) in the window."""
+        rows = self._rows("SELECT findings FROM checks WHERE chain_id = ? AND ts >= ? AND verdict = 'BLOCK'",
+                          (chain_id, since))
+        return sum(1 for r in rows if any(f.get("rule_id") in ("R1", "R2", "R3") and f.get("action") == "BLOCK"
+                                          for f in json.loads(r["findings"])))
+
+    def is_safe_mode(self, chain_id: int) -> dict[str, Any] | None:
+        rows = self._rows("SELECT * FROM safe_mode WHERE chain_id = ?", (chain_id,))
+        return dict(rows[0]) if rows else None
+
+    def safe_modes(self) -> list[dict[str, Any]]:
+        return [dict(r) for r in self._rows("SELECT * FROM safe_mode ORDER BY ts", ())]
+
+    def global_stop(self) -> dict[str, Any] | None:
+        rows = self._rows("SELECT * FROM global_stop WHERE id = 1", ())
+        if not rows:
+            return None
+        d = dict(rows[0])
+        d["signals"] = json.loads(d["signals"])
+        return d
 
     def is_frozen(self, address: str) -> dict[str, Any] | None:
         rows = self._rows("SELECT * FROM frozen_destinations WHERE address = ?", (address,))

@@ -164,7 +164,7 @@ def run_config(name: str, overrides: dict, base: Settings, n_normal: int = 500, 
         return real_assess(*a, **kw)
 
     explainer.assess = counted
-    guard = Guard(s, history, StaticStateProvider(state), runner, explainer, breaker=Breaker(history), gate=gate)
+    guard = Guard(s, history, StaticStateProvider(state), runner, explainer, breaker=Breaker(history, s), gate=gate)
     key = GuardKey(Ed25519PrivateKey.generate())
     approver = Approver(key, s.approval_ttl_seconds)
     signer = MockSigner(key.public_key_hex)
