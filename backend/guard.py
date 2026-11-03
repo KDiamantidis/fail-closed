@@ -53,7 +53,7 @@ class CheckResult:
 class Guard:
     def __init__(self, settings: Settings, history: History, state_provider: StateProvider,
                  runner: Any, explainer: Any, breaker: Any = None,
-                 clock=time.time, perf=time.perf_counter):
+                 clock=time.time, perf=time.perf_counter, events: Any = None):
         self.settings = settings
         self.history = history
         self.state_provider = state_provider
@@ -62,6 +62,15 @@ class Guard:
         self.breaker = breaker
         self.clock = clock  # wall clock for history windows (injected in tests)
         self.perf = perf  # monotonic clock for step timings
+        self.events = events  # callable(check_id, type, data) for the live stream; never raises out
+
+    def emit(self, check_id: str, kind: str, data: dict) -> None:
+        if self.events is None:
+            return
+        try:
+            self.events(check_id, kind, data)
+        except Exception:  # noqa: BLE001 - the stream must never affect a verdict
+            log.exception("event emit failed")
 
     def check(self, tx: TxRequest) -> CheckResult:
         check_id = uuid.uuid4().hex
@@ -69,6 +78,9 @@ class Guard:
         t_start = self.perf()
         timings: dict[str, float] = {}
         result = CheckResult(check_id=check_id, verdict=block(check_id, "not evaluated"), decoded=None)
+        self.emit(check_id, "received", {"wallet_type": tx.wallet_type.value, "chain_id": tx.chain_id,
+                                         "from": tx.from_, "to": tx.to, "value": str(tx.value),
+                                         "authorizations": len(tx.authorization_list or [])})
         try:
             self._check(tx, check_id, now, timings, result)
         except Exception as e:  # noqa: BLE001 - fail closed on anything unexpected
@@ -83,6 +95,11 @@ class Guard:
             except Exception:  # noqa: BLE001
                 log.exception("breaker failed")
                 result.breaker_actions = ["breaker error (see log)"]
+        v = result.verdict
+        self.emit(check_id, "verdict", {
+            "verdict": v.verdict.value, "path": v.path.value if v.path else None, "reasons": v.reasons,
+            "release_at": v.release_at, "breaker": result.breaker_actions,
+            "total_ms": round(timings["total"] * 1000)})
         return result
 
     # ---- internals ------------------------------------------------------------
@@ -98,6 +115,9 @@ class Guard:
         s = self.settings
         decoded = decode(tx, s.known_tokens)
         result.decoded = decoded
+        self.emit(check_id, "decoded", {"kind": decoded.kind.value, "destination": decoded.destination,
+                                        "asset": decoded.asset, "amount": str(decoded.amount),
+                                        "note": decoded.note})
 
         state: StartingState | None
         try:
@@ -110,19 +130,23 @@ class Guard:
                           history=self.history, state=state, now=now)
         req_findings = self._timed(timings, "request_rules", run_rules, REQUEST_RULES, ctx)
 
+        self.emit(check_id, "request_rules", {"findings": [_finding(f) for f in req_findings]})
         path, reasons, llm = self._route(tx, decoded, req_findings, timings)
+        self.emit(check_id, "path", {"path": path.value, "reasons": reasons})
 
         sim: SimulationResult | None = None
         if path is Path.SLOW:
             if state is None:
                 sim = SimulationResult(ok=False, error="no starting state from the StateProvider")
             else:
+                self.emit(check_id, "sandbox_started", {"image": s.sandbox_image, "chain_id": tx.chain_id})
                 try:
                     sim = self._timed(timings, "sandbox", self.runner.run, tx, state)
                 except SandboxError as e:
                     sim = SimulationResult(ok=False, error=str(e))
             for k, v in (sim.timings or {}).items():
                 timings[f"sandbox.{k}"] = v
+            self.emit(check_id, "sandbox_done", _sim_summary(sim))
             llm = self._timed(timings, "llm", self._explain, tx, sim)
         elif path is Path.EARLY:
             llm = self._timed(timings, "llm", self._explain, tx, None)
@@ -133,6 +157,8 @@ class Guard:
             request_findings=req_findings, context=ctx, path_reasons=reasons))
         if verdict.verdict is Decision.DELAY:
             verdict.release_at = now + s.delay_minutes * 60
+        self.emit(check_id, "findings", {"findings": [_finding(f) for f in verdict.findings],
+                                         "llm": llm.model_dump() if llm else None})
         result.verdict, result.simulation, result.llm = verdict, sim, llm
 
     def _route(self, tx: TxRequest, d: Decoded, findings, timings) -> tuple[Path, list[str], LLMAssessment | None]:
@@ -192,3 +218,30 @@ class Guard:
             ))
         except Exception:  # noqa: BLE001
             log.exception("could not record check %s", r.check_id)
+
+
+def _finding(f) -> dict:
+    return {"rule_id": f.rule_id, "action": f.action.value, "title": f.title, "detail": f.detail}
+
+
+def _sim_summary(sim: SimulationResult) -> dict:
+    """What the sandbox saw, compact, for the live stream."""
+    if not sim.ok:
+        return {"ok": False, "error": sim.error}
+    diff = sim.state_diff or {}
+    pre_all, changes = diff.get("pre", {}), {}
+    for addr, post in diff.get("post", {}).items():
+        changes[addr] = {k: {"before": pre_all.get(addr, {}).get(k), "after": v}
+                         for k, v in post.items() if k in ("code", "nonce", "balance")}
+    return {
+        "ok": True,
+        "delegation_mode": sim.delegation_mode,
+        "receipt_status": (sim.receipt or {}).get("status"),
+        "logs": len((sim.receipt or {}).get("logs") or []),
+        "diff": changes,
+        "probe": [{k: p.get(k) for k in ("caller", "caller_kind", "call", "status", "native_out",
+                                         "token_out", "moved")} for p in sim.probe],
+        "limits": {k: sim.sandbox.get(k) for k in ("NetworkMode", "ReadonlyRootfs", "Memory", "NanoCpus",
+                                                   "PidsLimit", "CapDrop", "SecurityOpt")},
+        "timings_ms": {k: round(v * 1000) for k, v in (sim.timings or {}).items()},
+    }

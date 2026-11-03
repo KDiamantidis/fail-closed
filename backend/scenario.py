@@ -70,3 +70,28 @@ def load(path: Path) -> Scenario:
 def discover(directory: Path) -> list[Path]:
     """Scenario files in run order (file names sort a_, b_, c_, ...)."""
     return sorted(p for p in Path(directory).glob("*.json") if p.is_file())
+
+
+def merged_state(scenarios: list[Scenario]) -> StartingState:
+    """All demo scenarios' Guard-side state in one (addresses must not conflict)."""
+    accounts: dict = {}
+    for sc in scenarios:
+        for addr, acct in sc.state.accounts.items():
+            if addr in accounts and accounts[addr] != acct:
+                raise ValueError(f"scenario {sc.name} redefines account {addr}")
+            accounts[addr] = acct
+    return StartingState(accounts=accounts)
+
+
+def merged_policy(scenarios: list[Scenario]) -> dict[str, Any]:
+    """All demo scenarios' Guard-side policy in one: lists are joined, scalars must agree."""
+    policy: dict[str, Any] = {}
+    for sc in scenarios:
+        for k, v in sc.policy.items():
+            if isinstance(v, list):
+                policy[k] = list(dict.fromkeys([*policy.get(k, []), *(x.lower() for x in v)]))
+            elif k in policy and str(policy[k]) != str(v):
+                raise ValueError(f"scenario {sc.name} sets {k}={v}, another set {policy[k]}")
+            else:
+                policy[k] = v
+    return policy

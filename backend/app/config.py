@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     guard_key_path: str = str(Path.home() / ".fail-closed" / "guard_ed25519.pem")
     approval_ttl_seconds: int = 120
 
+    # API
+    admin_token: str = ""  # required for POST /breaker/reset; empty = reset disabled
+    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    signer_db: str = str(REPO_ROOT / "data" / "signer.sqlite3")  # mock signer replay store
+
     # Guard-side policy lists (JSON arrays in env). Addresses are normalized to lowercase.
     known_tokens: list[str] = []  # ERC-20s whose transfer() counts as a plain withdrawal
     delegate_allowlist: list[str] = []  # EIP-7702 delegates that are allowed (R1)

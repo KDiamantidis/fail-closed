@@ -126,3 +126,14 @@ class ScenarioStateProvider(StateProvider):
         return StartingState(
             accounts={a: s for a, s in self._state.accounts.items() if a in wanted}
         )
+
+
+class StaticStateProvider(StateProvider):
+    """A fixed Guard-side state (e.g. the merged demo scenarios for the API)."""
+
+    def __init__(self, state: StartingState):
+        self._state = state
+
+    def get_state(self, tx: TxRequest) -> StartingState:
+        wanted = request_accounts(tx)
+        return StartingState(accounts={a: s for a, s in self._state.accounts.items() if a in wanted})

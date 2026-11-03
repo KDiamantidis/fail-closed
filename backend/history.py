@@ -222,6 +222,10 @@ class History:
     def events(self) -> list[dict[str, Any]]:
         return [dict(r) for r in self._rows("SELECT * FROM breaker_events ORDER BY ts, rowid", ())]
 
+    def recent(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Newest first."""
+        return list(reversed(self.checks()))[:limit]
+
     def checks(self) -> list[dict[str, Any]]:
         out = []
         for r in self._rows("SELECT * FROM checks ORDER BY ts, rowid", ()):
