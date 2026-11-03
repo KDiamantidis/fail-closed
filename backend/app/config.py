@@ -57,7 +57,8 @@ class Settings(BaseSettings):
     approval_ttl_seconds: int = 120
 
     # API
-    admin_token: str = ""  # required for POST /breaker/reset; empty = reset disabled
+    admin_token: str = ""  # required for admin actions (reset, approve/reject); empty = disabled
+    redteam_public: bool = False  # true: POST /redteam/run without the admin token (one run at a time)
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     signer_db: str = str(REPO_ROOT / "data" / "signer.sqlite3")  # mock signer replay store
 

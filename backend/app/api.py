@@ -20,13 +20,15 @@ import asyncio
 import json
 import logging
 import secrets
+import threading
 import time
+import urllib.request
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, model_validator
@@ -38,6 +40,7 @@ from breaker import Breaker
 from events import EventBus
 from guard import CheckResult, Guard
 from history import History
+from redteam import RedTeam
 from holds import HoldError, HoldManager
 from llm import LLMExplainer
 from sandbox_gate import GuardBusy, SandboxGate
@@ -62,6 +65,12 @@ class ResetRequest(BaseModel):
         if (self.address is None) == (self.wallet is None):
             raise ValueError("give exactly one of address or wallet")
         return self
+
+
+def http_health(url: str) -> dict[str, Any]:
+    """The red-team health probe: a real HTTP call to our own /health."""
+    with urllib.request.urlopen(url, timeout=2) as r:  # noqa: S310 - our own fixed URL
+        return {"ok": r.status == 200}
 
 
 def check_payload(res: CheckResult) -> dict[str, Any]:
@@ -97,6 +106,11 @@ class Services:
         self.run_id = run_id
         self.breaker = Breaker(history)
         self.holds = HoldManager(guard, approver, signer, publish=self.publish)
+        self.redteam_lock = threading.Lock()  # one red-team run at a time
+        self.health_probe: Any = None  # override in tests; default: HTTP GET of our own /health
+
+    def make_redteam(self, probe) -> RedTeam:
+        return RedTeam(self.settings, health_probe=probe, gate=self.guard.gate)
 
     def publish(self, check_id: str, kind: str, data: dict) -> None:
         self.bus.publish(check_id, kind, data, run_id=self.run_id)
@@ -232,6 +246,59 @@ def create_app(services: Services | None = None) -> FastAPI:
             return svc.holds.reject(hold_id, actor=(body or DecisionRequest()).actor)
         except HoldError as e:
             raise HTTPException(status_code=e.status, detail=e.detail)
+
+    @app.post("/redteam/run")
+    async def redteam_run(request: Request, x_admin_token: str | None = Header(default=None)):
+        """Hostile payloads in real sandboxes (same limits as a check). SSE: one event per payload."""
+        if not svc.settings.redteam_public:
+            require_admin(x_admin_token)
+        if not svc.redteam_lock.acquire(blocking=False):
+            raise HTTPException(status_code=409, detail="a red-team run is already running")
+        run_id = "redteam-" + uuid.uuid4().hex[:8]
+        health_url = str(request.base_url).rstrip("/") + "/health"
+        probe = svc.health_probe or (lambda: http_health(health_url))
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+
+        def on_result(r: dict) -> None:
+            ev = {k: r[k] for k in ("name", "tried", "limit", "result", "status", "seconds", "health")}
+            ev["contained"] = "yes" if r["contained"] else "no"
+            svc.bus.publish("-", "redteam_payload", ev, run_id=run_id)
+            loop.call_soon_threadsafe(queue.put_nowait, ("redteam_payload", ev))
+
+        def work() -> None:
+            try:
+                report = svc.make_redteam(probe).run(on_result=on_result)
+                report["run_id"] = run_id
+                svc.history.save_redteam(run_id, report["finished"], report)
+                done = {"run_id": run_id, "all_contained": report["all_contained"], "red": report["red"]}
+                svc.bus.publish("-", "redteam_finished", done, run_id=run_id)
+                loop.call_soon_threadsafe(queue.put_nowait, ("redteam_finished", done))
+            except Exception as e:  # noqa: BLE001 - a broken run is reported, never "contained"
+                log.exception("red-team run failed")
+                loop.call_soon_threadsafe(queue.put_nowait, ("redteam_error", {"error": f"{type(e).__name__}: {e}"}))
+            finally:
+                svc.redteam_lock.release()
+
+        threading.Thread(target=work, name=run_id, daemon=True).start()
+
+        async def gen():
+            yield f"event: redteam_started\ndata: {json.dumps({'run_id': run_id})}\n\n"
+            while True:
+                kind, data = await queue.get()
+                yield f"event: {kind}\ndata: {json.dumps(data)}\n\n"
+                if kind in ("redteam_finished", "redteam_error"):
+                    return
+
+        return StreamingResponse(gen(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @app.get("/redteam/last")
+    def redteam_last() -> dict:
+        last = svc.history.last_redteam()
+        if last is None:
+            raise HTTPException(status_code=404, detail="no red-team run yet")
+        return last
 
     @app.post("/breaker/reset")
     def reset(body: ResetRequest, x_admin_token: str | None = Header(default=None)) -> dict:

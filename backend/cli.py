@@ -400,6 +400,28 @@ def print_breaker(history: History) -> None:
         print(f"  {r['wallet']}  {r['reason']}")
 
 
+def print_redteam_row(r: dict) -> None:
+    print(f"{r['status'].upper():<10} {r['name']:<12} {r['seconds']:>5.1f}s  {r['limit']}")
+    print(f"{'':<10} tried : {r['tried']}")
+    print(f"{'':<10} result: {r['result']}")
+    if r.get("health"):
+        h = r["health"]
+        print(f"{'':<10} host health during the run: {h['answered']}/{h['calls']} answered, "
+              f"avg {h['avg_ms']} ms, max {h['max_ms']} ms")
+
+
+def cmd_redteam(health_url: str | None) -> int:
+    from app.api import http_health
+    from redteam import RedTeam
+
+    probe = (lambda: http_health(health_url)) if health_url else None
+    print("Fail Closed | red-team containment | same limits as a normal check")
+    report = RedTeam(get_settings(), health_probe=probe).run(on_result=print_redteam_row)
+    print("")
+    print("ALL CONTAINED" if report["all_contained"] else f"RED: {', '.join(report['red'])}")
+    return 0 if report["all_contained"] else 1
+
+
 def cmd_reset(db: str, address: str | None, wallet: str | None, actor: str) -> int:
     h = History(db)
     b = Breaker(h)
@@ -435,7 +457,11 @@ def main(argv: list[str] | None = None) -> int:
     rs.add_argument("--db", default=None, help="history database (default: HISTORY_DB)")
     br = sub.add_parser("breaker", help="show frozen destinations and paused wallets")
     br.add_argument("--db", default=None)
+    rt = sub.add_parser("redteam", help="run hostile payloads in the real sandbox; RED if any escapes")
+    rt.add_argument("--health-url", default=None, help="API /health to call during the fork/memory bombs")
     args = ap.parse_args(argv)
+    if args.cmd == "redteam":
+        return cmd_redteam(args.health_url)
 
     if args.cmd == "run-all":
         return cmd_run_all(args.dir, args.db)

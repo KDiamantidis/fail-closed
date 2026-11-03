@@ -80,6 +80,12 @@ CREATE TABLE IF NOT EXISTS held (
     signed      INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS redteam_reports (
+    id     TEXT PRIMARY KEY,
+    ts     REAL NOT NULL,
+    report TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS breaker_events (
     ts      REAL NOT NULL,
     action  TEXT NOT NULL,
@@ -280,6 +286,14 @@ class History:
                 "signed = ? WHERE id = ? AND status = 'pending'",
                 (status, outcome, decided_by, now, approval_id, None if signed is None else int(signed), check_id))
             return cur.rowcount == 1
+
+    def save_redteam(self, run_id: str, ts: float, report: dict[str, Any]) -> None:
+        with self.lock, self.conn:
+            self.conn.execute("INSERT INTO redteam_reports VALUES (?, ?, ?)", (run_id, ts, json.dumps(report)))
+
+    def last_redteam(self) -> dict[str, Any] | None:
+        rows = self._rows("SELECT * FROM redteam_reports ORDER BY ts DESC, rowid DESC LIMIT 1", ())
+        return {"id": rows[0]["id"], "ts": rows[0]["ts"], **json.loads(rows[0]["report"])} if rows else None
 
     def recent(self, limit: int = 50) -> list[dict[str, Any]]:
         """Newest first."""
