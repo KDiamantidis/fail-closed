@@ -1,0 +1,145 @@
+"""A tiny fake of the Docker SDK + an in-memory 'anvil' so the runner can be unit-tested."""
+
+import json
+import shlex
+import threading
+import time
+from dataclasses import dataclass
+
+from sandbox_runner import SEP
+
+TX_HASH = "0x" + "ab" * 32
+
+
+@dataclass
+class ExecResult:
+    exit_code: int
+    output: tuple[bytes, bytes]
+
+
+class FakeChain:
+    """Answers the cast commands the runner sends. Override attributes to inject faults."""
+
+    def __init__(self):
+        self.balance: dict[str, int] = {}
+        self.nonce: dict[str, int] = {}
+        self.code: dict[str, str] = {}
+        self.storage: dict[tuple[str, str], str] = {}
+        self.auth_count = 0
+        self.receipt = {"transactionHash": TX_HASH, "status": "0x1", "logs": []}
+        self.diff = {"pre": {"0xaa": {"balance": "0x10"}}, "post": {"0xaa": {"balance": "0x0"}}}
+        self.mined_tx_override = None
+        self.drop_set_nonce = False
+        self.block_on: str | None = None  # command word that hangs until the container is removed
+        self.fail_on: str | None = None  # command word that exits non-zero
+        self.commands: list[list[str]] = []
+
+    def mined_tx(self):
+        if self.mined_tx_override is not None:
+            return self.mined_tx_override
+        return {"hash": TX_HASH, "authorizationList": [{"nonce": hex(i)} for i in range(self.auth_count)]}
+
+    def handle(self, argv: list[str], removed: threading.Event) -> tuple[int, str]:
+        self.commands.append(argv)
+        key = " ".join(argv[:3]) if argv[0] == "cast" else argv[0]
+        method = argv[5] if argv[:2] == ["cast", "rpc"] else None
+        word = method or key
+        if self.block_on and self.block_on in word:
+            removed.wait(30)
+            return 137, "killed"
+        if self.fail_on and self.fail_on in word:
+            return 1, "boom"
+        if argv[:2] == ["cast", "block-number"]:
+            return 0, "1"
+        if argv[0] == "cat":
+            return 0, "0x6080604052\n"
+        if argv[:3] == ["cast", "wallet", "sign-auth"]:
+            self.auth_count += 1
+            return 0, "0xf85a" + "00" * 40
+        if argv[:2] == ["cast", "send"]:
+            return 0, TX_HASH
+        if method:
+            p = json.loads(argv[6])
+            if method == "anvil_setBalance":
+                self.balance[p[0]] = int(p[1], 16)
+            elif method == "anvil_setNonce":
+                if not self.drop_set_nonce:
+                    self.nonce[p[0]] = int(p[1], 16)
+            elif method == "anvil_setCode":
+                self.code[p[0]] = p[1]
+            elif method == "anvil_setStorageAt":
+                self.storage[(p[0], p[1])] = p[2]
+            elif method == "eth_getBalance":
+                return 0, json.dumps(hex(self.balance.get(p[0], 0)))
+            elif method == "eth_getTransactionCount":
+                return 0, json.dumps(hex(self.nonce.get(p[0], 0)))
+            elif method == "eth_getCode":
+                return 0, json.dumps(self.code.get(p[0], "0x"))
+            elif method == "eth_getStorageAt":
+                return 0, json.dumps(self.storage.get((p[0], p[1]), "0x" + "0" * 64))
+            elif method == "eth_getTransactionReceipt":
+                return 0, json.dumps(self.receipt)
+            elif method == "eth_getTransactionByHash":
+                return 0, json.dumps(self.mined_tx())
+            elif method == "debug_traceTransaction":
+                return 0, json.dumps(self.diff)
+            return 0, "null"
+        return 127, f"unknown command {argv}"
+
+
+class FakeContainer:
+    def __init__(self, chain: FakeChain, name: str):
+        self.chain = chain
+        self.name = name
+        self.removed = threading.Event()
+        self.attrs = {
+            "HostConfig": {"NetworkMode": "none", "ReadonlyRootfs": True, "Memory": 536870912,
+                           "NanoCpus": 1_000_000_000, "PidsLimit": 128, "CapDrop": ["ALL"],
+                           "SecurityOpt": ["no-new-privileges"]},
+            "Config": {"Env": ["PATH=/usr/local/bin:/usr/bin"], "User": "foundry"},
+        }
+
+    def reload(self):
+        pass
+
+    def exec_run(self, argv, demux=True):
+        if self.removed.is_set():
+            return ExecResult(137, (b"", b"container removed"))
+        if argv[:2] == ["sh", "-c"]:
+            outs = []
+            for part in argv[2].split(f" && echo {SEP} && "):
+                code, out = self.chain.handle(shlex.split(part), self.removed)
+                if code != 0:
+                    return ExecResult(code, (b"", out.encode()))
+                outs.append(out)
+            return ExecResult(0, (f"\n{SEP}\n".join(outs).encode(), b""))
+        code, out = self.chain.handle(list(argv), self.removed)
+        return ExecResult(code, (out.encode(), b"") if code == 0 else (b"", out.encode()))
+
+    def remove(self, force=False):
+        self.removed.set()
+
+
+class FakeContainers:
+    def __init__(self, chain: FakeChain, run_delay: float = 0.0, run_error: Exception | None = None):
+        self.chain = chain
+        self.run_delay = run_delay
+        self.run_error = run_error
+        self.created: list[FakeContainer] = []
+        self.run_kwargs: dict | None = None
+
+    def run(self, image, command=None, name=None, **kwargs):
+        self.run_kwargs = {"image": image, "command": command, "name": name, **kwargs}
+        if self.run_error:
+            raise self.run_error
+        if self.run_delay:
+            time.sleep(self.run_delay)
+        c = FakeContainer(self.chain, name)
+        self.created.append(c)
+        return c
+
+
+class FakeDocker:
+    def __init__(self, chain: FakeChain | None = None, **kw):
+        self.chain = chain or FakeChain()
+        self.containers = FakeContainers(self.chain, **kw)

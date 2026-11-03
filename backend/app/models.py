@@ -126,6 +126,9 @@ class SimulationResult(BaseModel):
     error: str | None = None
     receipt: dict[str, Any] | None = None
     state_diff: dict[str, Any] | None = None  # prestateTracer diffMode: {"pre": ..., "post": ...}
+    tx: dict[str, Any] | None = None  # the mined tx as seen by the chain (incl. authorizationList)
+    timings: dict[str, float] = Field(default_factory=dict)  # seconds per step
+    sandbox: dict[str, Any] = Field(default_factory=dict)  # applied container limits (docker inspect)
 
 
 class LLMAssessment(BaseModel):
