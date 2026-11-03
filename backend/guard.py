@@ -31,6 +31,7 @@ from history import CheckRecord, History
 from policies.engine import RuleContext, block, decide, run_rules
 from policies.request_rules import REQUEST_RULES
 from policies.sim_rules import SIM_RULES
+from sandbox_gate import GuardBusy
 from sandbox_runner import SandboxError
 from state_provider import StartingState, StateProvider
 
@@ -53,7 +54,7 @@ class CheckResult:
 class Guard:
     def __init__(self, settings: Settings, history: History, state_provider: StateProvider,
                  runner: Any, explainer: Any, breaker: Any = None,
-                 clock=time.time, perf=time.perf_counter, events: Any = None):
+                 clock=time.time, perf=time.perf_counter, events: Any = None, gate: Any = None):
         self.settings = settings
         self.history = history
         self.state_provider = state_provider
@@ -63,6 +64,7 @@ class Guard:
         self.clock = clock  # wall clock for history windows (injected in tests)
         self.perf = perf  # monotonic clock for step timings
         self.events = events  # callable(check_id, type, data) for the live stream; never raises out
+        self.gate = gate  # SandboxGate: concurrency cap for sandboxes (None = no cap)
 
     def emit(self, check_id: str, kind: str, data: dict) -> None:
         if self.events is None:
@@ -83,6 +85,15 @@ class Guard:
                                          "authorizations": len(tx.authorization_list or [])})
         try:
             self._check(tx, check_id, now, timings, result)
+        except GuardBusy as e:
+            # No slot: record the attempt as BLOCK, then let the caller answer 503.
+            result.verdict = block(check_id, f"guard busy: {e}")
+            timings["total"] = self.perf() - t_start
+            result.timings = timings
+            self._record(tx, result, now)
+            self.emit(check_id, "verdict", {"verdict": "BLOCK", "path": None, "reasons": result.verdict.reasons,
+                                            "busy": True, "total_ms": round(timings["total"] * 1000)})
+            raise
         except Exception as e:  # noqa: BLE001 - fail closed on anything unexpected
             log.exception("guard check failed")
             result.verdict = block(check_id, f"guard error: {type(e).__name__}: {e}")
@@ -141,7 +152,7 @@ class Guard:
             else:
                 self.emit(check_id, "sandbox_started", {"image": s.sandbox_image, "chain_id": tx.chain_id})
                 try:
-                    sim = self._timed(timings, "sandbox", self.runner.run, tx, state)
+                    sim = self._timed(timings, "sandbox", self._run_sandbox, tx, state)
                 except SandboxError as e:
                     sim = SimulationResult(ok=False, error=str(e))
             for k, v in (sim.timings or {}).items():
@@ -160,6 +171,12 @@ class Guard:
         self.emit(check_id, "findings", {"findings": [_finding(f) for f in verdict.findings],
                                          "llm": llm.model_dump() if llm else None})
         result.verdict, result.simulation, result.llm = verdict, sim, llm
+
+    def _run_sandbox(self, tx: TxRequest, state: StartingState) -> SimulationResult:
+        if self.gate is None:
+            return self.runner.run(tx, state)
+        with self.gate.slot():  # GuardBusy if no slot in time
+            return self.runner.run(tx, state)
 
     def _route(self, tx: TxRequest, d: Decoded, findings, timings) -> tuple[Path, list[str], LLMAssessment | None]:
         s = self.settings

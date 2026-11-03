@@ -94,5 +94,6 @@ def test_mercado_scenario_through_the_api(tmp_path):
     assert got[8:10] == [("DELAY", False)] * 2  # held: no approval until Phase 3 release
     assert all(v == ("BLOCK", False) for v in got[10:20])
     assert got[20] == ("ALLOW", True)  # the other customer still gets paid
-    frozen = c.get("/breaker").json()["frozen_destinations"]
+    frozen = out["breaker"]["frozen_destinations"]  # the run's own isolated breaker state
     assert [f["address"] for f in frozen] == ["0xbad0000000000000000000000000000000000e01"]
+    assert c.get("/breaker").json()["frozen_destinations"] == []  # main state untouched

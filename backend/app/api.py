@@ -21,6 +21,7 @@ import json
 import logging
 import secrets
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,7 @@ from events import EventBus
 from guard import CheckResult, Guard
 from history import History
 from llm import LLMExplainer
+from sandbox_gate import GuardBusy, SandboxGate
 from sandbox_runner import SandboxRunner
 from scenario import discover, load, merged_policy, merged_state
 from signer_mock import MockSigner, ReplayStore
@@ -83,10 +85,28 @@ class Services:
     """Everything the API needs; built once, injectable for tests."""
 
     def __init__(self, settings: Settings, guard: Guard, history: History, approver: Approver,
-                 signer: MockSigner, bus: EventBus, scenarios_dir: Path):
+                 signer: MockSigner, bus: EventBus, scenarios_dir: Path, run_id: str = "main"):
         self.settings, self.guard, self.history = settings, guard, history
         self.approver, self.signer, self.bus, self.scenarios_dir = approver, signer, bus, scenarios_dir
+        self.run_id = run_id
         self.breaker = Breaker(history)
+
+    def publish(self, check_id: str, kind: str, data: dict) -> None:
+        self.bus.publish(check_id, kind, data, run_id=self.run_id)
+
+    def isolated(self, run_id: str) -> "Services":
+        """A demo run with its OWN fresh state: in-memory history, breaker and replay store.
+        Same Guard parts (policy, Guard-side state, sandbox, LLM, approval key). Nothing it
+        does is visible to the main state or to another visitor's run."""
+        history = History(":memory:")
+        g = self.guard
+        guard = Guard(g.settings, history, g.state_provider, g.runner, g.explainer,
+                      breaker=Breaker(history), clock=g.clock, perf=g.perf,
+                      events=lambda cid, kind, data: self.bus.publish(cid, kind, data, run_id=run_id),
+                      gate=g.gate)
+        signer = MockSigner(self.signer.guard_public_key_hex, ReplayStore(":memory:"), clock=self.signer.clock)
+        return Services(self.settings, guard, history, self.approver, signer, self.bus, self.scenarios_dir,
+                        run_id=run_id)
 
     @classmethod
     def default(cls, base: Settings | None = None, scenarios_dir: Path = REPO_ROOT / "scenarios") -> "Services":
@@ -97,22 +117,23 @@ class Services:
         bus = EventBus()
         guard = Guard(settings, history, StaticStateProvider(merged_state(scenarios)),
                       SandboxRunner(settings), LLMExplainer(settings), breaker=Breaker(history),
-                      events=bus.publish)
+                      events=lambda cid, kind, data: bus.publish(cid, kind, data, run_id="main"),
+                      gate=SandboxGate(settings.sandbox_max_concurrent, settings.sandbox_queue_seconds))
         key = GuardKey.load_or_create(settings.guard_key_path)
         approver = Approver(key, settings.approval_ttl_seconds)
         signer = MockSigner(key.public_key_hex, ReplayStore(settings.signer_db))  # public key only
         return cls(settings, guard, history, approver, signer, bus, scenarios_dir)
 
     def withdraw(self, tx: TxRequest) -> dict[str, Any]:
-        res = self.guard.check(tx)
+        res = self.guard.check(tx)  # GuardBusy propagates: the API answers 503, nothing is signed
         approval = self.approver.issue(tx, res.verdict)
-        self.bus.publish(res.check_id, "approval", {
+        self.publish(res.check_id, "approval", {
             "issued": approval is not None, "request_hash": request_hash(tx),
             "approval_id": approval.approval_id if approval else None,
             "expiry": approval.expiry if approval else None,
             "why": "verdict ALLOW" if approval else f"verdict {res.verdict.verdict.value}: no approval"})
         signed = self.signer.sign(tx, approval)
-        self.bus.publish(res.check_id, "signer", {"signed": signed.signed, "reason": signed.reason})
+        self.publish(res.check_id, "signer", {"signed": signed.signed, "reason": signed.reason})
         return {"check": check_payload(res), "approval": approval.model_dump() if approval else None,
                 "signer": signed.to_dict()}
 
@@ -137,11 +158,17 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.post("/check")
     def check(tx: TxRequest) -> dict:
         """Dry run: the verdict and why. NEVER an approval (approvals only via /withdraw)."""
-        return {**check_payload(svc.guard.check(tx)), "dry_run": True}
+        try:
+            return {**check_payload(svc.guard.check(tx)), "dry_run": True}
+        except GuardBusy as e:
+            raise HTTPException(status_code=503, detail=f"Guard busy: {e}")
 
     @app.post("/withdraw")
     def withdraw(tx: TxRequest) -> dict:
-        return svc.withdraw(tx)
+        try:
+            return svc.withdraw(tx)
+        except GuardBusy as e:
+            raise HTTPException(status_code=503, detail=f"Guard busy: {e}. Nothing was approved or signed.")
 
     @app.get("/history")
     def history(limit: int = Query(50, ge=1, le=500)) -> list[dict]:
@@ -169,14 +196,17 @@ def create_app(services: Services | None = None) -> FastAPI:
         return {"reset": ok, **target, "detail": "reset and logged" if ok else "nothing to reset"}
 
     @app.get("/events")
-    def events(after: int = 0, check_id: str | None = None) -> list[dict]:
-        return svc.bus.since(after, check_id)
+    def events(after: int = 0, check_id: str | None = None, run_id: str | None = None) -> list[dict]:
+        return svc.bus.since(after, check_id, run_id)
 
     @app.get("/stream")
-    async def stream(limit: int | None = Query(None, ge=1), replay: int = Query(0, ge=0, le=1000)):
-        """SSE. `replay` sends the last N buffered events first; `limit` closes after N events."""
+    async def stream(limit: int | None = Query(None, ge=1), replay: int = Query(0, ge=0, le=1000),
+                     run_id: str | None = None):
+        """SSE. `replay` sends the last N buffered events first; `limit` closes after N events;
+        `run_id` keeps only one demo run (or "main")."""
         queue = svc.bus.subscribe()
-        backlog = list(svc.bus.recent)[-replay:] if replay else []
+        backlog = [e for e in list(svc.bus.recent) if run_id is None or e["run_id"] == run_id]
+        backlog = backlog[-replay:] if replay else []
 
         async def gen():
             sent = 0
@@ -192,6 +222,8 @@ def create_app(services: Services | None = None) -> FastAPI:
                         ev = await asyncio.wait_for(queue.get(), timeout=15)
                     except TimeoutError:
                         yield ": keepalive\n\n"
+                        continue
+                    if run_id is not None and ev["run_id"] != run_id:
                         continue
                     yield f"id: {ev['seq']}\nevent: {ev['type']}\ndata: {json.dumps(ev)}\n\n"
                     sent += 1
@@ -221,11 +253,19 @@ def create_app(services: Services | None = None) -> FastAPI:
         if name not in files:  # only known names: no paths from the client
             raise HTTPException(status_code=404, detail="unknown scenario")
         sc = load(files[name])
+        run_id = uuid.uuid4().hex[:12]
+        iso = svc.isolated(run_id)  # fresh state per run: one visitor never changes another's result
+        iso.publish("-", "run_started", {"scenario": name, "requests": len(sc.requests)})
         results = []
-        for r in sc.requests:
-            out = svc.withdraw(r.tx())
-            results.append({"label": r.label, "expect": r.expect.model_dump(), **out})
-        return {"name": name, "title": sc.title, "results": results}
+        try:
+            for r in sc.requests:
+                out = iso.withdraw(r.tx())
+                results.append({"label": r.label, "expect": r.expect.model_dump(), **out})
+        except GuardBusy as e:
+            raise HTTPException(status_code=503, detail=f"Guard busy: {e}. Nothing was approved or signed.")
+        iso.publish("-", "run_finished", {"scenario": name})
+        return {"name": name, "title": sc.title, "run_id": run_id, "results": results,
+                "breaker": {"frozen_destinations": iso.history.frozen(), "paused_wallets": iso.history.paused()}}
 
     return app
 

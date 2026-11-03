@@ -21,9 +21,10 @@ class EventBus:
         self.recent: deque[dict[str, Any]] = deque(maxlen=keep)
         self.queue_size = queue_size
 
-    def publish(self, check_id: str, kind: str, data: dict[str, Any]) -> dict[str, Any]:
+    def publish(self, check_id: str, kind: str, data: dict[str, Any], run_id: str = "main") -> dict[str, Any]:
         with self._lock:
-            event = {"seq": next(self._seq), "ts": time.time(), "type": kind, "check_id": check_id, "data": data}
+            event = {"seq": next(self._seq), "ts": time.time(), "type": kind, "run_id": run_id,
+                     "check_id": check_id, "data": data}
             self.recent.append(event)
             subs = list(self._subs)
         for loop, queue in subs:
@@ -49,6 +50,8 @@ class EventBus:
         with self._lock:
             self._subs = [(lp, q) for lp, q in self._subs if q is not queue]
 
-    def since(self, seq: int, check_id: str | None = None) -> list[dict[str, Any]]:
+    def since(self, seq: int, check_id: str | None = None, run_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
-            return [e for e in self.recent if e["seq"] > seq and (check_id is None or e["check_id"] == check_id)]
+            return [e for e in self.recent if e["seq"] > seq
+                    and (check_id is None or e["check_id"] == check_id)
+                    and (run_id is None or e["run_id"] == run_id)]

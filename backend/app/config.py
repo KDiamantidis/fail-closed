@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     sandbox_memory: str = "512m"
     sandbox_cpus: float = 1.0
     sandbox_pids: int = 128
+    sandbox_max_concurrent: int = 4  # sandboxes at once on this host
+    sandbox_queue_seconds: float = 10.0  # wait for a slot, then 503 "Guard busy" (fail closed)
 
     # History (SQLite)
     history_db: str = str(REPO_ROOT / "data" / "history.sqlite3")
