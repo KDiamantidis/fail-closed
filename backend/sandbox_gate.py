@@ -25,11 +25,12 @@ class SandboxGate:
         self.rejected = 0
 
     @contextmanager
-    def slot(self):
-        if not self._sem.acquire(timeout=self.queue_seconds):
+    def slot(self, wait: float | None = None):
+        wait = self.queue_seconds if wait is None else wait
+        if not self._sem.acquire(timeout=wait):
             with self._lock:
                 self.rejected += 1
-            raise GuardBusy(f"all {self.max_concurrent} sandboxes busy for {self.queue_seconds:g}s")
+            raise GuardBusy(f"all {self.max_concurrent} sandboxes busy for {wait:g}s")
         with self._lock:
             self.active += 1
         try:

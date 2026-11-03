@@ -2,6 +2,7 @@
 
 import json
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -170,6 +171,30 @@ def test_all_contained_report():
     assert by["cpu_spin"]["timed_out"] is True
 
 
+def test_payloads_run_in_parallel_inside_the_cap_leaving_one_slot_free():
+    from sandbox_gate import SandboxGate
+
+    gate = SandboxGate(max_concurrent=4, queue_seconds=1)
+    fc = FakeClient()
+    active, peak, lock = [0], [0], threading.Lock()
+    inner = fc.run
+
+    def slow_run(*a, **kw):
+        with lock:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0], gate.active)
+        time.sleep(0.15)
+        with lock:
+            active[0] -= 1
+        return inner(*a, **kw)
+
+    fc.containers.run = slow_run
+    rep = RedTeam(S, client=fc, gate=gate).run()
+    assert rep["all_contained"] and rep["parallel"] == 3
+    assert 1 < peak[0] <= 3  # parallel, and one slot always left for real checks
+    assert [r["name"] for r in rep["results"]] == [p.name for p in payloads(S)]  # stable order
+
+
 def test_a_breach_is_red_and_fails():
     rep = RedTeam(S, client=FakeClient({"network": NET_OK.replace("NET a BLOCKED", "NET a OPEN")})).run()
     assert not rep["all_contained"] and rep["red"] == ["network"]
@@ -193,7 +218,8 @@ def test_api_redteam_stream_and_last(tmp_path):
         body = "".join(r.iter_text())
     events = [ln[6:] for ln in body.splitlines() if ln.startswith("data: ")]
     payload_events = [json.loads(e) for e in events[1:-1]]
-    assert [e["name"] for e in payload_events] == [p.name for p in payloads(svc.settings)]
+    # payloads run in parallel: events arrive as each finishes
+    assert sorted(e["name"] for e in payload_events) == sorted(p.name for p in payloads(svc.settings))
     assert all(e["contained"] == "yes" and "tried" in e and "seconds" in e for e in payload_events)
     assert json.loads(events[-1])["all_contained"] is True
     last = c.get("/redteam/last").json()

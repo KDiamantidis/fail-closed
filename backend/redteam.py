@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -276,14 +277,24 @@ class RedTeam:
         ctx = Context(self.settings, host_secrets(self.settings), self.settings.sandbox_pids,
                       _mem_bytes(self.settings.sandbox_memory))
         started = time.time()
-        results = []
-        for p in payloads(self.settings):
-            if only and p.name not in only:
-                continue
+        todo = [p for p in payloads(self.settings) if not only or p.name in only]
+        # In parallel, inside the normal sandbox cap, but leave one slot free for real checks.
+        cap = self.gate.max_concurrent if self.gate is not None else self.settings.sandbox_max_concurrent
+        workers = max(1, min(len(todo), cap - 1))
+        done_lock = threading.Lock()
+        by_name: dict[str, dict] = {}
+
+        def one(p: Payload) -> None:
             r = self._one(p, ctx)
-            results.append(r)
-            if on_result:
-                on_result(r)
+            with done_lock:
+                by_name[p.name] = r
+                if on_result:
+                    on_result(r)
+
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="redteam") as pool:
+            for f in [pool.submit(one, p) for p in todo]:
+                f.result()
+        results = [by_name[p.name] for p in todo]  # report in a stable order
         opts = container_options(self.settings)
         return {
             "started": started, "finished": time.time(),
@@ -293,11 +304,13 @@ class RedTeam:
                                             "nano_cpus", "pids_limit", "cap_drop", "security_opt", "tmpfs")}
                       | {"timeout_seconds": self.settings.sandbox_timeout_seconds},
             "results": results,
+            "parallel": workers,
         }
 
     def _one(self, p: Payload, ctx: Context) -> dict[str, Any]:
         if self.gate is not None:
-            with self.gate.slot():
+            # a red-team payload may wait longer for a slot than a check (it is not a customer)
+            with self.gate.slot(wait=3 * self.settings.sandbox_timeout_seconds):
                 obs = self._execute(p)
         else:
             obs = self._execute(p)

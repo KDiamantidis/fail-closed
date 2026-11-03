@@ -172,11 +172,18 @@ def create_app(services: Services | None = None) -> FastAPI:
                     log.exception("DELAY worker failed")
                 await asyncio.sleep(svc.settings.delay_check_seconds)
 
-        task = asyncio.create_task(delay_worker())
+        async def warm_up():
+            runner = svc.guard.runner
+            if hasattr(runner, "warm_up"):
+                secs = await asyncio.to_thread(runner.warm_up)
+                log.info("sandbox warm-up took %.1fs", secs)
+
+        tasks = [asyncio.create_task(delay_worker()), asyncio.create_task(warm_up())]
         try:
             yield
         finally:
-            task.cancel()
+            for t in tasks:
+                t.cancel()
 
     app = FastAPI(title="Fail Closed", version="0.3.0", lifespan=lifespan,
                   description="Signing Guard: no approval, no signature.")

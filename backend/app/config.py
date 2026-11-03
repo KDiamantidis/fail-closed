@@ -42,7 +42,7 @@ class Settings(BaseSettings):
 
     # Sandbox: fresh container per check, always destroyed.
     sandbox_image: str = "fail-closed-sandbox:foundry-v1.8.5"
-    sandbox_timeout_seconds: float = 30.0
+    sandbox_timeout_seconds: float = 10.0  # slow checks take 1-5 s; a cold Docker start can take ~8 s
     sandbox_memory: str = "512m"
     sandbox_cpus: float = 1.0
     sandbox_pids: int = 128

@@ -286,6 +286,22 @@ class SandboxRunner:
         result.timings = run.timings
         return result
 
+    def warm_up(self) -> float:
+        """Start and destroy one throwaway sandbox so Docker is warm before the first real
+        check (a cold Docker Desktop start took ~8 s once). Never raises."""
+        t0 = self.clock()
+        c = None
+        try:
+            c = self.client.containers.run(self.settings.sandbox_image, command=anvil_args(1),
+                                           name=f"fc-warmup-{uuid.uuid4().hex[:8]}", **container_options(self.settings))
+            self._wait_ready(c)
+        except Exception as e:  # noqa: BLE001
+            log.warning("sandbox warm-up failed: %s", e)
+        finally:
+            if c is not None:
+                self._remove(c)
+        return self.clock() - t0
+
     # ---- steps ----------------------------------------------------------------
 
     def _run(self, run: _Run, tx: TxRequest, state: StartingState, force_mode: str | None) -> SimulationResult:
