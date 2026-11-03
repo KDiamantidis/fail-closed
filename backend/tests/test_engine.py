@@ -17,8 +17,8 @@ SIM_OK = SimulationResult(
 
 LLM_CASES = [
     None,  # LLM failed / not called
-    LLMAssessment(intent_summary="Looks fine.", risk_score=0),
-    LLMAssessment(intent_summary="Looks like a drainer!", risk_score=100),
+    LLMAssessment(intent_summary="Plain transfer.", risk_score=0, explanation="Looks fine.", escalate=False),
+    LLMAssessment(intent_summary="Drainer!", risk_score=100, explanation="Looks like a drainer!", escalate=True),
 ]
 
 

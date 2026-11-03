@@ -132,10 +132,17 @@ class SimulationResult(BaseModel):
 
 
 class LLMAssessment(BaseModel):
-    """Explanation only. Never read by the decision logic."""
+    """Explanation only. Never read by the decision logic.
 
-    intent_summary: str
-    risk_score: int = Field(ge=0, le=100)
+    `escalate` is a routing hint for the fast path (Phase 2): it can only ask for a
+    deeper check (fast -> slow), never for a verdict.
+    """
+
+    intent_summary: str = Field(min_length=1)
+    risk_score: int = Field(ge=0, le=100, strict=True)
+    explanation: str = Field(min_length=1)
+    escalate: bool = Field(strict=True)
+    mock: bool = False  # True = produced by the local mock, not by a model
 
 
 class Verdict(BaseModel):
@@ -143,7 +150,9 @@ class Verdict(BaseModel):
     reasons: list[str]
     findings: list[Finding]
     explanation: str | None = None
+    intent_summary: str | None = None
     risk_score: int | None = None
+    llm_mock: bool | None = None
     path: Path | None = None
     wallet_type: WalletType | None = None
     chain_id: int | None = None

@@ -1,6 +1,14 @@
+import os
+
 import pytest
 
 from app.config import Settings
+
+# Tests never read the developer's real .env (it may hold the API key or a different model).
+Settings.model_config["env_file"] = None
+for _name in list(os.environ):
+    if _name.startswith(("VULTR_", "LLM_", "SANDBOX_", "FAST_PATH_")):
+        del os.environ[_name]
 
 
 def _docker_ready() -> str | None:

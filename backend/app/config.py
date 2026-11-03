@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     llm_mode: str = "auto"  # auto | mock | live
     llm_timeout_seconds: float = 15.0
     llm_max_retries: int = 1
+    # Fast path (Phase 2): the LLM may only ask "escalate to slow path"; LLM error -> slow path.
+    fast_path_llm_escalation: bool = True
 
     # Sandbox: fresh container per check, always destroyed.
     sandbox_image: str = "fail-closed-sandbox:foundry-v1.8.5"
