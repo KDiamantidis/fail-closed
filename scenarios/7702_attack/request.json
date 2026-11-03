@@ -1,0 +1,15 @@
+{
+  "wallet_type": "customer_hot",
+  "chain_id": 1,
+  "from": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+  "to": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+  "data": "0x35faa416",
+  "value": "0",
+  "authorization_list": [
+    {"chain_id": 1, "address": "0x00000000000000000000000000000000005eeeee", "nonce": 3, "authority": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"},
+    {"chain_id": 1, "address": "0x00000000000000000000000000000000005eeeee", "nonce": 4, "authority": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"},
+    {"chain_id": 1, "address": "0x00000000000000000000000000000000005eeeee", "nonce": 5, "authority": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"},
+    {"chain_id": 1, "address": "0x00000000000000000000000000000000005eeeee", "nonce": 6, "authority": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"},
+    {"chain_id": 1, "address": "0x00000000000000000000000000000000005eeeee", "nonce": 7, "authority": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+  ]
+}
