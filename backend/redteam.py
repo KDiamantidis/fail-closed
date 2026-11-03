@@ -172,7 +172,8 @@ def judge_memory(o: Observed, c: Context) -> tuple[bool, str]:
     mmax = (_lines(o.output, "MEM_MAX ") or ["MEM_MAX ? SWAP_MAX ?"])[0].split()
     ok = ("ALLOCATED" not in o.output and (oom >= 1 or o.oom_killed) and mmax[1] == str(c.mem_limit)
           and o.max_mem <= c.mem_limit)
-    peak = f"; peak seen by docker stats {o.max_mem // 2**20} MiB" if o.max_mem else ""
+    # docker stats samples about once a second; a fast OOM kill is often over before a sample
+    peak = f"; peak seen by docker stats {o.max_mem // 2**20} MiB" if o.max_mem >= 64 * 2**20 else ""
     return ok, (f"memory.max {mmax[1]} (swap {mmax[3] if len(mmax) > 3 else '?'}); 2000 MiB allocation "
                 f"{'NOT completed' if 'ALLOCATED' not in o.output else 'COMPLETED'}; the kernel OOM-killed "
                 f"it ({oom} oom_kill event{'s' if oom != 1 else ''}){peak}")

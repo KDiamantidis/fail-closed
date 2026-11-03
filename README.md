@@ -119,6 +119,44 @@ Every slow-path check runs in a new Docker container that is destroyed afterward
 
 The demo has a **red-team button** that sends hostile code straight into the sandbox (tries to reach the internet, read secrets, write files, fork-bomb). Every attempt fails and is shown in the logs.
 
+## Containment
+
+### Red team
+
+`POST /redteam/run` (or `backend/cli.py redteam`) runs each payload in a fresh sandbox with
+**exactly the same limits as a normal check**; only the command differs. Each result is judged
+by what actually happened (cgroup counters, `/proc`, what the payload printed), not by exit
+codes. A payload that is not contained is **RED** and fails the run.
+
+| Payload | What it tries | Limit that stops it | Result (measured) |
+|---|---|---|---|
+| network | 1.1.1.1:443, Docker host gateway, `host.docker.internal`, cloud metadata 169.254.169.254, DNS `vultr.com` | `--network none` | 6/6 blocked; only `lo`, no routes |
+| secrets | `env`, `/proc/1/environ`, find `.env` / `docker.sock` / `*.key` / `*.pem`, the Guard key path | no env, no mounts, no secrets in the image | nothing found; no host secret value in any output |
+| write | write to `/`, `/etc`, `/usr`, `/sandbox`, `/home`; run a binary from `/tmp` | `--read-only`, `/tmp` tmpfs `noexec` | 5/5 read-only; exec from `/tmp` blocked |
+| fork bomb | `f() { f \| f & }; f` | `--pids-limit 128` | peak 128 processes, 1766 forks refused by the kernel |
+| memory bomb | allocate 2000 MiB | `--memory 512m`, no swap | OOM-killed (`oom_kill 1`), allocation never completed |
+| CPU spin | `while :; do :; done` | 1 CPU + hard timeout 30 s | stopped by the timeout, container destroyed |
+| privilege | `mount`, `chown` to root, setuid `su`, `setpriv` to uid 0, raw socket | `--cap-drop ALL`, `no-new-privileges`, non-root user | all capabilities 0, never root, all blocked |
+
+While the fork bomb and the memory bomb run, the API's `/health` is called every 0.5 s:
+it answered 9/9 times (max 49.5 ms) and 2/2 times (max 5.3 ms). The host is not affected.
+
+### Fail closed
+
+Each of these ends in **R0 BLOCK, no approval, no signature** (tested end to end through `/withdraw`):
+
+- the sandbox container is killed in the middle of a check
+- the trace is empty, broken JSON, or missing
+- the receipt is missing
+- the sandbox times out
+- the Docker daemon is not reachable
+- the injected starting state does not read back correctly
+- a rule crashes or misses an input
+- too many sandboxes at once: **503 "Guard busy"**, nothing signed
+
+If the AI (Vultr Inference) is down, nothing changes but the explanation: the verdict comes
+from the rules.
+
 ## Vultr services used
 
 | Service | Use |
@@ -215,8 +253,15 @@ curl -N localhost:8000/stream                                 # live events (SSE
 | `POST /breaker/reset` | `{"address": …}` or `{"wallet": …}`, header `X-Admin-Token` (401 without, 403 wrong) |
 | `GET /stream` | Server-Sent Events, one per step: received, decoded, request_rules, path, sandbox_started, sandbox_done, findings, verdict, approval, signer |
 | `GET /events?after=` | The same events as JSON, to catch up |
-| `GET /scenarios`, `POST /scenarios/{name}/run` | Demo scenarios, run through `/withdraw` |
+| `GET /scenarios`, `POST /scenarios/{name}/run` | Demo scenarios, run through `/withdraw`. Each run has its **own fresh state** and a `run_id` (one visitor never changes another's result); the DELAY worker is fast-forwarded at the end |
+| `GET /pending`, `POST /pending/{id}/approve`, `/reject` | NEEDS_HUMAN waits for a human (`X-Admin-Token`). Approve re-checks the rules first; a new freeze/pause/finding turns it into BLOCK. Logged with who and when |
+| `POST /redteam/run`, `GET /redteam/last` | Containment check (SSE, one event per payload); admin unless `REDTEAM_PUBLIC=true` |
 | `GET /guard/public-key`, `GET /health` | The Guard's ed25519 public key; status |
+
+At most `SANDBOX_MAX_CONCURRENT` (4) sandboxes run at once; a check waits up to
+`SANDBOX_QUEUE_SECONDS` (10 s), then gets **503 "Guard busy"**: no approval, no signature.
+DELAY holds are released by a background worker after `DELAY_MINUTES`, but only if a re-check
+of the rules finds nothing new.
 
 ### Approval and signer
 
