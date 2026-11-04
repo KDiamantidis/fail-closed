@@ -1,56 +1,87 @@
 import type { ReactNode } from "react";
-import { short, type Verdict } from "../lib/api";
+import { VERDICT_WORD } from "../lib/copy";
+import { short } from "../lib/api";
 
-export const VERDICT_STYLE: Record<Verdict, { text: string; border: string; bg: string; label: string }> = {
-  ALLOW: { text: "text-signal", border: "border-signal/50", bg: "bg-signal/10", label: "ALLOW" },
-  DELAY: { text: "text-hold", border: "border-hold/50", bg: "bg-hold/10", label: "DELAY" },
-  NEEDS_HUMAN: { text: "text-human", border: "border-human/50", bg: "bg-human/10", label: "NEEDS HUMAN" },
-  BLOCK: { text: "text-deny", border: "border-deny/60", bg: "bg-deny/10", label: "BLOCK" },
+type Tone = "ok" | "held" | "review" | "bad" | "neutral" | "brand";
+
+const TONE: Record<Tone, string> = {
+  ok: "text-ok bg-ok-bg border-ok-line",
+  held: "text-held bg-held-bg border-held-line",
+  review: "text-review bg-review-bg border-review-line",
+  bad: "text-bad bg-bad-bg border-bad-line",
+  neutral: "text-body bg-subtle border-border",
+  brand: "text-brand bg-brand-tint border-[#99e6d4]",
 };
 
-export function VerdictPill({ v, big = false }: { v: Verdict; big?: boolean }) {
-  const s = VERDICT_STYLE[v] ?? VERDICT_STYLE.BLOCK;
+const VERDICT_TONE: Record<string, Tone> = { ALLOW: "ok", DELAY: "held", NEEDS_HUMAN: "review", BLOCK: "bad", BUSY: "bad" };
+
+export function Pill({ tone = "neutral", children, dot = false, testid }:
+  { tone?: Tone; children: ReactNode; dot?: boolean; testid?: string }) {
   return (
-    <span data-verdict={v}
-      className={`inline-flex items-center rounded border font-bold tracking-wider ${s.text} ${s.border} ${s.bg} ${big ? "px-2.5 py-1 text-[13px]" : "px-1.5 py-0.5 text-[11px]"}`}>
-      {v === "BLOCK" ? "✕ " : ""}{s.label}
+    <span data-testid={testid}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[12px] font-medium whitespace-nowrap ${TONE[tone]}`}>
+      {dot && <span className="size-1.5 rounded-full bg-current" aria-hidden />}
+      {children}
     </span>
   );
 }
 
-export function Section({ id, cmd, title, children, aside }:
-  { id: string; cmd: string; title: string; children: ReactNode; aside?: ReactNode }) {
+export function VerdictPill({ v }: { v: string }) {
+  return <Pill tone={VERDICT_TONE[v] ?? "neutral"} dot>{VERDICT_WORD[v as keyof typeof VERDICT_WORD] ?? v}</Pill>;
+}
+
+export function verdictTone(v: string): Tone {
+  return VERDICT_TONE[v] ?? "neutral";
+}
+
+export function Card({ title, action, children, className = "", testid, pad = true }:
+  { title?: ReactNode; action?: ReactNode; children: ReactNode; className?: string; testid?: string; pad?: boolean }) {
   return (
-    <section id={id} aria-labelledby={`${id}-h`} className="scroll-mt-6">
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 id={`${id}-h`} className="text-[15px] font-bold text-fg">
-          <span className="text-signal">$ </span>{cmd}
-          <span className="ml-3 font-normal text-faint">// {title}</span>
-        </h2>
-        {aside}
-      </div>
-      {children}
+    <section className={`card ${className}`} data-testid={testid}>
+      {(title || action) && (
+        <div className="card-head">
+          {typeof title === "string" ? <h2 className="card-title">{title}</h2> : title}
+          {action}
+        </div>
+      )}
+      <div className={pad ? "p-5" : ""}>{children}</div>
     </section>
   );
 }
 
-/** An address, shortened, with the scenario label if there is one. Full value on hover. */
+export function PageHeader({ title, lead, action }: { title: string; lead?: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+      <div className="min-w-0">
+        <h1 className="text-[22px] font-semibold sm:text-[24px]">{title}</h1>
+        {lead && <p className="mt-1 max-w-[720px] text-[14px] text-muted">{lead}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+/** An address: monospace, shortened, with the scenario label. Full value on hover. */
 export function Addr({ a, labels }: { a?: string | null; labels?: Record<string, string> }) {
-  if (!a) return null;
+  if (!a) return <span className="text-faint">—</span>;
   const label = labels?.[a.toLowerCase()];
   return (
-    <span title={a} className="hex">
-      <span className="text-fg">{short(a)}</span>
-      {label ? <span className="text-faint"> ({label})</span> : null}
+    <span title={a} className="whitespace-nowrap">
+      <span className="mono text-ink">{short(a)}</span>
+      {label && <span className="text-muted"> · {label}</span>}
     </span>
   );
 }
 
-export function KV({ k, children }: { k: string; children: ReactNode }) {
+export function Empty({ title, children }: { title: string; children?: ReactNode }) {
   return (
-    <div className="flex gap-3">
-      <span className="w-20 shrink-0 text-faint">{k}</span>
-      <span className="min-w-0 hex">{children}</span>
+    <div className="rounded-lg border border-dashed border-border-strong bg-subtle px-5 py-8 text-center">
+      <p className="font-medium text-ink">{title}</p>
+      {children && <div className="mt-1 text-[13px] text-muted">{children}</div>}
     </div>
   );
+}
+
+export function Spinner() {
+  return <span className="inline-block size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />;
 }
