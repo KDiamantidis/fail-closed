@@ -125,7 +125,9 @@ def test_scenarios_list_and_unknown_name(api):
     c, _ = api
     names = [s["name"] for s in c.get("/scenarios").json()]
     assert names[0] == "a_customer_small_withdrawal" and "d_binance_7702" in names
-    assert c.post("/scenarios/..%2F..%2Fetc%2Fpasswd/run").status_code == 404
+    r = c.post("/scenarios/..%2F..%2Fetc%2Fpasswd/run")
+    # 404 from the API, or 405 from the static UI mount when frontend/dist is built: refused either way
+    assert r.status_code in (404, 405) and "root:" not in r.text
     assert c.post("/scenarios/nope/run").status_code == 404
 
 
