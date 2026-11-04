@@ -251,6 +251,41 @@ def create_app(services: Services | None = None) -> FastAPI:
                 "fast_path_llm_escalation": svc.settings.fast_path_llm_escalation,
                 "delay_minutes": svc.settings.delay_minutes}
 
+    @app.get("/policies")
+    def policies() -> dict:
+        """Read-only: the active rules and thresholds, in plain words, for the Policies page.
+        It reports the current settings; it decides nothing."""
+        st = svc.settings
+        eth = lambda wei: f"{wei / 10**18:g} ETH"  # noqa: E731
+        return {
+            "rules": [
+                {"id": "R0", "verdict": "BLOCK", "text": "If the sandbox check fails, times out or returns nothing, the request is blocked."},
+                {"id": "R1", "verdict": "BLOCK", "text": "A wallet may not delegate its control to a contract that is not on the approved list."},
+                {"id": "R2", "verdict": "BLOCK", "text": "No more than one delegation authorization per request, and none for consecutive nonces."},
+                {"id": "R3", "verdict": "NEEDS_HUMAN / BLOCK", "text": f"A withdrawal above {st.r3_max_single_dest_pct:g}% of the wallet needs review; a hidden drain seen in the sandbox is blocked."},
+                {"id": "R4", "verdict": "NEEDS_HUMAN", "text": f"Treasury payments above {eth(st.r4_treasury_limit_wei)} need review."},
+                {"id": "R5", "verdict": "NEEDS_HUMAN / BLOCK", "text": "Treasury payments go only to approved destinations; unknown and above the limit is blocked."},
+                {"id": "R6", "verdict": "BLOCK", "text": f"A hot wallet may send at most {eth(st.r6_outflow_limit_wei)} per {st.r6_window_minutes} minutes."},
+                {"id": "R7", "verdict": "DELAY / BLOCK", "text": f"One address receiving from {st.r7_delay_chains} chains within {st.r7_window_hours} h is held; from {st.r7_freeze_chains} chains it is frozen."},
+                {"id": "R8", "verdict": "BLOCK", "text": f"{st.r8_freeze_assets} different assets to one address within {st.r8_window_minutes} min freezes that address."},
+                {"id": "C1", "verdict": "NEEDS_HUMAN", "text": "Customer wallets only sign plain transfers; anything else needs review."},
+            ],
+            "breaker": [
+                {"level": 1, "text": "Freeze one destination address (from R7 or R8)."},
+                {"level": 2, "text": "Pause one wallet after a delegation or drain is detected (R1, R2, R3 with evidence)."},
+                {"level": 3, "text": f"Safe mode on a chain after {st.safe_mode_paused_wallets} paused wallets or {st.safe_mode_evidence_blocks} evidence blocks within {st.safe_mode_window_minutes} min."},
+                {"level": 4, "text": f"Global stop only with {st.global_stop_signals} independent signals."},
+            ],
+            "hold_minutes": st.delay_minutes,
+            "lists": {"known_tokens": len(st.known_tokens), "delegate_allowlist": len(st.delegate_allowlist),
+                      "treasury_allowlist": len(st.treasury_allowlist)},
+            "sandbox": {"mode": st.sandbox_mode, "network": "none", "memory": st.sandbox_memory,
+                        "cpus": st.sandbox_cpus, "processes": st.sandbox_pids,
+                        "timeout_seconds": st.sandbox_timeout_seconds, "max_concurrent": st.sandbox_max_concurrent},
+            "ai": {"escalation_on_fast_path": st.fast_path_llm_escalation,
+                   "fast_path_timeout_seconds": st.fast_path_llm_timeout_seconds},
+        }
+
     @app.get("/guard/public-key")
     def public_key() -> dict:
         return {"algorithm": "ed25519", "public_key": svc.approver.public_key_hex, "key_id": svc.approver.key.key_id}

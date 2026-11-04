@@ -73,3 +73,13 @@ def test_demo_runs_are_bounded(api, monkeypatch):
     for i in range(3):
         c.post(f"/scenarios/a_customer_small_withdrawal/run?run_id=bounded{i:04d}")
     assert list(svc.demo_runs) == ["bounded0001", "bounded0002"]
+
+
+def test_policies_are_read_only_plain_words(api):
+    c, _ = api
+    p = c.get("/policies").json()
+    assert [r["id"] for r in p["rules"]] == ["R0", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "C1"]
+    assert "25%" in p["rules"][3]["text"] and "10 ETH" in p["rules"][4]["text"]
+    assert [b["level"] for b in p["breaker"]] == [1, 2, 3, 4]
+    assert p["sandbox"]["network"] == "none" and p["hold_minutes"] == 15
+    assert c.post("/policies").status_code == 405  # read only
