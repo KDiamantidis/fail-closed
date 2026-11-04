@@ -471,7 +471,7 @@ def create_app(services: Services | None = None) -> FastAPI:
         out = []
         for name, path in _scenario_files().items():
             sc = load(path)
-            out.append({"name": name, "title": sc.title, "description": sc.description,
+            out.append({"name": name, "title": sc.title, "description": sc.description, "labels": sc.labels,
                         "requests": [{"label": r.label, "expect": r.expect.model_dump()} for r in sc.requests]})
         return out
 
