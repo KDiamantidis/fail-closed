@@ -12,8 +12,10 @@ Routing:
                   no request/history finding at all.
     treasury:     the same shape, destination on the allowlist, amount under the limit,
                   no finding.
-    FAST_PATH_LLM_ESCALATION on: the LLM is asked; escalate=true, an error or a timeout
-                  -> slow path (more checking, never less). The LLM never sets a verdict.
+    FAST_PATH_LLM_ESCALATION on: the LLM is asked; escalate=true -> slow path. If the AI check
+                  is unavailable (timeout, error, 429, invalid answer, not configured) it is
+                  never read as "no escalation": -> slow path (full simulation; more checking,
+                  never less, and never a BLOCK just for that). The LLM never sets a verdict.
 - slow: fresh sandbox, state diff, probe, simulation rules.
 Every check records why it took its path. Any unexpected error -> BLOCK (and recorded).
 """
@@ -30,6 +32,7 @@ from app.config import Settings
 from app.models import Decision, LLMAssessment, Path, SimulationResult, TxRequest, Verdict, WalletType
 from decode import Decoded, Kind, authority_of, decode
 from history import CheckRecord, History
+from llm import LLMUnavailable
 from policies.engine import RuleContext, block, decide, run_rules
 from policies.request_rules import REQUEST_RULES
 from policies.sim_rules import SIM_RULES
@@ -53,6 +56,12 @@ class CheckResult:
     breaker_actions: list[str] = field(default_factory=list)
     explanation: Future | None = None  # slow/early path: the LLM explanation, made in the background
     _explain_input: tuple | None = None
+
+
+
+def unavailable_reason(failure: str) -> str:
+    """The path reason when the fast-path AI check gives no usable answer (shown in the timeline)."""
+    return f"AI check unavailable ({failure or 'error'}) -> full simulation (more checking, never less)"
 
 
 class Guard:
@@ -235,18 +244,31 @@ class Guard:
             return Path.FAST, reasons + ["LLM escalation off"], None
         limit = s.fast_path_llm_timeout_seconds
         t0 = self.perf()
-        future = self._escalate_pool.submit(self._explain, tx, None)
+        future = self._escalate_pool.submit(self._escalation_check, tx)
         try:
-            llm = future.result(timeout=limit)
+            llm, failure = future.result(timeout=limit)
         except FutureTimeout:
-            timings["llm"] = self.perf() - t0
-            return Path.SLOW, reasons + [f"LLM timeout ({limit:g} s) -> slow path (more checking, never less)"], None
+            llm, failure = None, f"timeout {limit:g} s"
         timings["llm"] = self.perf() - t0
         if llm is None:
-            return Path.SLOW, reasons + ["LLM error -> slow path (more checking, never less)"], None
+            return Path.SLOW, reasons + [unavailable_reason(failure)], None
         if llm.escalate:
             return Path.SLOW, reasons + ["LLM asked for a deeper check"], llm
         return Path.FAST, reasons + ["LLM: no escalation" + (" (MOCK)" if llm.mock else "")], llm
+
+    def _escalation_check(self, tx: TxRequest) -> tuple[LLMAssessment | None, str]:
+        """The fast-path AI check: the assessment, or None and why it is unavailable."""
+        try:
+            raise_ = getattr(self.explainer, "assess_or_raise", None)
+            if raise_ is not None:
+                return raise_(tx, None), ""
+            llm = self.explainer.assess(tx, None)
+            return llm, "" if llm is not None else "error"
+        except LLMUnavailable as e:
+            return None, e.kind
+        except Exception as e:  # noqa: BLE001 - an unknown failure is still "unavailable"
+            log.warning("escalation check raised: %s", type(e).__name__)
+            return None, "error"
 
     def _explain_later(self, check_id: str, tx: TxRequest, sim: SimulationResult | None) -> LLMAssessment | None:
         """Background: make the explanation, store it, and send the SSE "explanation" event.

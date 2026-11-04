@@ -106,7 +106,7 @@ def test_llm_failure_on_fast_path_goes_slow():
     g = guard(explainer=FakeExplainer(fail=True))
     r = g.check(req())
     assert r.verdict.path is Path.SLOW and g.runner.calls == 1
-    assert any("LLM error -> slow path" in x for x in r.verdict.path_reasons)
+    assert any("AI check unavailable (error) -> full simulation" in x for x in r.verdict.path_reasons)
 
 
 def test_escalation_switch_off_skips_llm_on_fast_path():

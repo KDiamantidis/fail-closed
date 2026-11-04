@@ -118,7 +118,7 @@ def test_api_key_never_logged(caplog):
     e = explainer(err, err)
     assert e.assess(TX, SIM) is None
     assert KEY not in caplog.text
-    assert "***" in caplog.text
+    assert "LLM attempt 2/2 failed: error" in caplog.text  # the kind only, never the provider message
 
 
 def test_api_key_not_in_prompt():

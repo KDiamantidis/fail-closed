@@ -4,7 +4,8 @@ The LLM explains; it never decides. Output: {intent_summary, risk_score 0-100,
 explanation, escalate}. No Vultr model supports tool_choice, so we ask for plain JSON
 and validate it ourselves.
 
-Failure handling: invalid JSON, timeout or any error -> one retry -> None.
+Failure handling: invalid JSON, timeout, 429 or any error -> one retry -> None (assess) or
+LLMUnavailable with the reason (assess_or_raise; the guard uses it to route fast -> slow).
 With an API key set, a failure NEVER falls back to the mock. The mock is used only
 when there is no key (LLM_MODE=auto) or when LLM_MODE=mock, and is always marked.
 """
@@ -12,7 +13,10 @@ when there is no key (LLM_MODE=auto) or when LLM_MODE=mock, and is always marked
 import json
 import logging
 import re
+import threading
 import time
+from collections import Counter
+from fractions import Fraction
 from typing import Any
 
 from pydantic import ValidationError
@@ -28,6 +32,85 @@ MAX_DATA_CHARS = 9000  # the whole untrusted data block sent to the model
 MAX_SUMMARY_CHARS = 280  # output limits: the UI shows these as plain text
 MAX_EXPLANATION_CHARS = 1000
 DATA_OPEN, DATA_CLOSE = "<<<UNTRUSTED_DATA", "UNTRUSTED_DATA>>>"
+
+# USD per token (prompt, completion), from GET /v1/models on 2026-11-04. Used only to
+# estimate spend in reports; unknown models report tokens without a cost.
+PRICES_USD = {
+    "glm-5.3-flash": (Fraction("0.0000001"), Fraction("0.00000035")),
+    "glm-5.3": (Fraction("0.00000075"), Fraction("0.000003")),
+    "glm-5.2": (Fraction("0.00000075"), Fraction("0.000003")),
+    "qwen3.8-flash-next": (Fraction("0.0000001"), Fraction("0.0000002")),
+    "deepseek-v4.1-flash-1017": (Fraction("0.00000015"), Fraction("0.0000006")),
+}
+
+
+class LLMUnavailable(Exception):
+    """The model gave no usable answer. `kind` is a short, key-free reason for the timeline."""
+
+    def __init__(self, kind: str):
+        super().__init__(kind)
+        self.kind = kind
+
+
+def failure_kind(e: BaseException) -> str:
+    """timeout | rate limited (429) | invalid answer | error (HTTP n) | error. Never the message."""
+    import openai
+
+    if isinstance(e, ValueError):  # parse_assessment
+        return "invalid answer"
+    if isinstance(e, (openai.APITimeoutError, TimeoutError)):
+        return "timeout"
+    if isinstance(e, openai.RateLimitError) or getattr(e, "status_code", None) == 429:
+        return "rate limited (429)"
+    if isinstance(e, openai.APIStatusError):
+        return f"error (HTTP {e.status_code})"
+    if isinstance(e, openai.APIConnectionError):
+        return "error (connection)"
+    return "error"
+
+
+class LLMUsage:
+    """Thread-safe call, token and failure counters, for reports and cost estimates."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.reset()
+
+    def reset(self) -> None:
+        with self._lock:
+            self.calls = 0
+            self.ok = 0
+            self.failures: Counter[str] = Counter()
+            self.prompt_tokens = 0
+            self.completion_tokens = 0
+            self.cost_usd = Fraction(0)
+            self.priced = True
+
+    def add(self, model: str, usage: Any) -> None:
+        p = int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
+        c = int(getattr(usage, "completion_tokens", 0) or 0) if usage else 0
+        with self._lock:
+            self.prompt_tokens += p
+            self.completion_tokens += c
+            if model in PRICES_USD:
+                pi, po = PRICES_USD[model]
+                self.cost_usd += pi * p + po * c
+            else:
+                self.priced = False
+
+    def attempt(self, failure: str | None) -> None:
+        with self._lock:
+            self.calls += 1
+            if failure is None:
+                self.ok += 1
+            else:
+                self.failures[failure] += 1
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return {"calls": self.calls, "ok": self.ok, "failures": dict(self.failures),
+                    "prompt_tokens": self.prompt_tokens, "completion_tokens": self.completion_tokens,
+                    "cost_usd": round(float(self.cost_usd), 6) if self.priced else None}
 
 SYSTEM_PROMPT = """You explain simulated EVM transactions for a wallet security guard.
 Deterministic rules have ALREADY made the decision; you only explain it for a human operator.
@@ -184,6 +267,13 @@ class LLMExplainer:
     def __init__(self, settings: Settings, client: Any = None):
         self.settings = settings
         self._client = client
+        self.usage = LLMUsage()
+
+    @property
+    def model_label(self) -> str:
+        """What the UI shows: the model id when live, MOCK or OFF otherwise."""
+        m = self.mode
+        return self.settings.vultr_model if m == "live" else m.upper()
 
     @property
     def mode(self) -> str:
@@ -212,6 +302,12 @@ class LLMExplainer:
         return self._client
 
     def assess(self, tx: TxRequest, sim: SimulationResult | None) -> LLMAssessment | None:
+        try:
+            return self.assess_or_raise(tx, sim)
+        except LLMUnavailable:
+            return None  # never fall back to the mock when a key is set
+
+    def assess_or_raise(self, tx: TxRequest, sim: SimulationResult | None) -> LLMAssessment:
         mode = self.mode
         if mode == "mock":
             if self.settings.mock_llm_latency_ms > 0:
@@ -220,26 +316,34 @@ class LLMExplainer:
         if mode == "off":
             log.warning("LLM off (mode=%s, key set=%s): no explanation", self.settings.llm_mode,
                         bool(self.settings.vultr_inference_api_key))
-            return None
+            raise LLMUnavailable("not configured")
 
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": describe(tx, sim)},
         ]
-        attempts = 1 + max(0, self.settings.llm_max_retries)
+        s = self.settings
+        kwargs: dict[str, Any] = {"model": s.vultr_model, "messages": messages, "temperature": 0,
+                                  "max_tokens": s.llm_max_tokens}
+        if s.llm_json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        if s.llm_reasoning_effort:
+            kwargs["extra_body"] = {"reasoning_effort": s.llm_reasoning_effort}
+        attempts = 1 + max(0, s.llm_max_retries)
+        kind = "error"
         for i in range(1, attempts + 1):
             try:
-                resp = self.client.chat.completions.create(
-                    model=self.settings.vultr_model,
-                    messages=messages,
-                    temperature=0,
-                    max_tokens=1500,
-                )
-                return parse_assessment(resp.choices[0].message.content)
+                resp = self.client.chat.completions.create(**kwargs)
+                self.usage.add(s.vultr_model, getattr(resp, "usage", None))
+                out = parse_assessment(resp.choices[0].message.content)
+                self.usage.attempt(None)
+                return out
             except Exception as e:  # noqa: BLE001 - every failure is handled the same way
-                log.warning("LLM attempt %d/%d failed: %s: %s", i, attempts,
-                            type(e).__name__, self._redact(str(e))[:300])
-        return None  # never fall back to the mock when a key is set
+                kind = failure_kind(e)
+                self.usage.attempt(kind)
+                # the kind and the exception class only: provider messages can echo request data
+                log.warning("LLM attempt %d/%d failed: %s (%s)", i, attempts, kind, type(e).__name__)
+        raise LLMUnavailable(kind)  # never fall back to the mock when a key is set
 
     def _redact(self, s: str) -> str:
         key = self.settings.vultr_inference_api_key

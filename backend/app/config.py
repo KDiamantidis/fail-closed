@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     llm_mode: str = "auto"  # auto | mock | live
     llm_timeout_seconds: float = 15.0
     llm_max_retries: int = 1
+    # "" = the provider's default. "minimal" keeps thinking tokens (billed as output) and latency low.
+    llm_reasoning_effort: str = "minimal"
+    llm_json_mode: bool = True  # response_format json_object (we still parse and validate ourselves)
+    llm_max_tokens: int = 1500
     # Mock only (no Vultr key yet): make the numbers realistic and say so in every result.
     mock_llm_latency_ms: int = 800  # each mock call sleeps this long, like a real model call
     mock_llm_escalate_rate: float = 0.0  # share of plain transfers the mock escalates (deterministic)

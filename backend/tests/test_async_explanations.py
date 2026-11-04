@@ -66,7 +66,7 @@ def test_fast_path_llm_timeout_goes_to_the_slow_path():
     t0 = time.perf_counter()
     r = g.check(req())
     assert r.verdict.path is Path.SLOW and g.runner.calls == 1
-    assert any("LLM timeout (0.2 s) -> slow path" in x for x in r.verdict.path_reasons)
+    assert any("AI check unavailable (timeout 0.2 s) -> full simulation" in x for x in r.verdict.path_reasons)
     assert time.perf_counter() - t0 < 0.9  # did not wait for the slow model
 
 
