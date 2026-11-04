@@ -18,6 +18,8 @@ No response ever contains a secret: no settings, no API keys, no private keys.
 
 import asyncio
 import json
+import re
+from collections import OrderedDict
 import logging
 import secrets
 import threading
@@ -31,6 +33,7 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, model_validator
 
 from app.config import REPO_ROOT, Settings, get_settings
@@ -40,6 +43,7 @@ from breaker import Breaker
 from events import EventBus
 from guard import CheckResult, Guard
 from history import History
+from reports import blast_radius_data
 from loadtest import run_config
 from redteam import RedTeam
 from holds import HoldError, HoldManager
@@ -71,6 +75,12 @@ class ResetRequest(BaseModel):
         if sum(given) != 1:
             raise ValueError("give exactly one of address, wallet, chain_id or global_stop")
         return self
+
+
+DEMO_RUN_TTL_SECONDS = 30 * 60
+DEMO_RUN_MAX = 50
+RUN_ID = re.compile(r"^[a-z0-9]{8,32}$")
+FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
 
 
 def http_health(url: str) -> dict[str, Any]:
@@ -116,6 +126,26 @@ class Services:
         self.redteam_lock = threading.Lock()  # one red-team run at a time
         self.loadtest_lock = threading.Lock()  # one load demo at a time
         self.loadtest_runner: Any = None  # override in tests; default: a real SandboxRunner
+        # Demo runs stay alive for a while so a visitor can approve/reject NEEDS_HUMAN items in
+        # THEIR OWN isolated run (never the main state). Bounded: oldest runs are dropped.
+        self.demo_runs: "OrderedDict[str, tuple[Services, float]]" = OrderedDict()
+        self.demo_lock = threading.Lock()
+
+    def remember_demo(self, run_id: str, iso: "Services") -> None:
+        with self.demo_lock:
+            now = time.time()
+            for rid in [r for r, (_, exp) in self.demo_runs.items() if exp < now]:
+                del self.demo_runs[rid]
+            self.demo_runs[run_id] = (iso, now + DEMO_RUN_TTL_SECONDS)
+            while len(self.demo_runs) > DEMO_RUN_MAX:
+                self.demo_runs.popitem(last=False)
+
+    def demo(self, run_id: str) -> "Services":
+        with self.demo_lock:
+            entry = self.demo_runs.get(run_id)
+        if entry is None or entry[1] < time.time():
+            raise HTTPException(status_code=404, detail="demo run not found or expired; run the scenario again")
+        return entry[0]
         self.health_probe: Any = None  # override in tests; default: HTTP GET of our own /health
 
     def make_redteam(self, probe) -> RedTeam:
@@ -208,6 +238,18 @@ def create_app(services: Services | None = None) -> FastAPI:
     def health() -> dict:
         return {"status": "ok", "llm_mode": svc.guard.explainer.mode, "model": svc.settings.vultr_model,
                 "sandbox_image": svc.settings.sandbox_image}
+
+    @app.get("/status")
+    def status() -> dict:
+        """For the UI header: what is running, and the main breaker level (0-4)."""
+        st = svc.breaker.state()
+        level = (4 if st["global_stop"] else 3 if st["safe_mode_chains"] else 2 if st["paused_wallets"]
+                 else 1 if st["frozen_destinations"] else 0)
+        return {"sandbox_mode": svc.settings.sandbox_mode, "llm": "MOCK" if svc.guard.explainer.mode == "mock"
+                else "REAL" if svc.guard.explainer.mode == "live" else "OFF", "model": svc.settings.vultr_model,
+                "breaker_level": level, "redteam_public": svc.settings.redteam_public,
+                "fast_path_llm_escalation": svc.settings.fast_path_llm_escalation,
+                "delay_minutes": svc.settings.delay_minutes}
 
     @app.get("/guard/public-key")
     def public_key() -> dict:
@@ -434,13 +476,20 @@ def create_app(services: Services | None = None) -> FastAPI:
         return out
 
     @app.post("/scenarios/{name}/run")
-    def run_scenario(name: str) -> dict:
+    def run_scenario(name: str, run_id: str | None = None) -> dict:
+        """`run_id` may be chosen by the client (so it can subscribe to /stream?run_id first)."""
         files = _scenario_files()
         if name not in files:  # only known names: no paths from the client
             raise HTTPException(status_code=404, detail="unknown scenario")
+        if run_id is not None and not RUN_ID.match(run_id):
+            raise HTTPException(status_code=422, detail="run_id: 8-32 lowercase letters or digits")
+        run_id = run_id or uuid.uuid4().hex[:12]
+        with svc.demo_lock:
+            if run_id in svc.demo_runs:
+                raise HTTPException(status_code=409, detail="run_id already used")
         sc = load(files[name])
-        run_id = uuid.uuid4().hex[:12]
         iso = svc.isolated(run_id)  # fresh state per run: one visitor never changes another's result
+        svc.remember_demo(run_id, iso)
         iso.publish("-", "run_started", {"scenario": name, "requests": len(sc.requests)})
         results = []
         try:
@@ -463,8 +512,32 @@ def create_app(services: Services | None = None) -> FastAPI:
         released = iso.holds.release_due(now=later)
         iso.publish("-", "run_finished", {"scenario": name, "delay_worker": len(released)})
         return {"name": name, "title": sc.title, "run_id": run_id, "results": results,
-                "delay_worker": {"ran_at": f"+{svc.settings.delay_minutes} min (simulated)", "results": released},
-                "breaker": iso.breaker.state()}
+                "delay_worker": {"ran_at": f"+{svc.settings.delay_minutes} min (simulated)",
+                                 "skipped_minutes": svc.settings.delay_minutes, "results": released},
+                "breaker": iso.breaker.state(), "blast_radius": blast_radius_data(iso.history, sc),
+                "pending": iso.history.held("pending", "needs_human")}
+
+    # ---- the visitor's own demo run: human approval without touching the main state ------
+
+    @app.get("/demo/{run_id}/pending")
+    def demo_pending(run_id: str) -> list[dict]:
+        return svc.demo(run_id).history.held("pending", "needs_human")
+
+    @app.post("/demo/{run_id}/pending/{hold_id}/{decision}")
+    def demo_decide(run_id: str, hold_id: str, decision: str) -> dict:
+        if decision not in ("approve", "reject"):
+            raise HTTPException(status_code=404, detail="unknown decision")
+        iso = svc.demo(run_id)
+        try:
+            if decision == "approve":
+                return iso.holds.approve(hold_id, actor="demo-visitor")
+            return iso.holds.reject(hold_id, actor="demo-visitor")
+        except HoldError as e:
+            raise HTTPException(status_code=e.status, detail=e.detail)
+
+    # ---- the built web UI (frontend/dist), after every API route ---------------------------
+    if FRONTEND_DIST.is_dir():
+        app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="ui")
 
     return app
 

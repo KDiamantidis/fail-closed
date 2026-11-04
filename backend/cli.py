@@ -154,41 +154,23 @@ def print_action(i: int, n: int, r: ScenarioRequest, done: bool, history: Histor
 def blast_radius(history: History, sc: Scenario) -> list[str]:
     """For each frozen destination in this scenario: value that was ALLOWed to it before the
     freeze (and value held by DELAY, which the freeze keeps from being released)."""
+    from reports import blast_radius_data
+
     lines = []
-    txs = [r.tx() for r in sc.requests if not r.is_action]
-    addrs = {t.to for t in txs} | {"0x" + t.data[34:74] for t in txs if t.data.startswith("0xa9059cbb")}
-    for row in history.frozen():
-        addr = row["address"]
-        if addr not in addrs:
-            continue
-        allowed: dict[tuple[int, str], int] = {}
-        held: dict[tuple[int, str], int] = {}
-        for c in history.checks_to(addr):
-            if c["ts"] > row["ts"]:
-                break
-            bucket = allowed if c["verdict"] == "ALLOW" else held if c["verdict"] == "DELAY" else None
-            if bucket is not None:
-                bucket[(c["chain_id"], c["asset"])] = bucket.get((c["chain_id"], c["asset"]), 0) + c["amount"]
-        lines.append(f"blast radius for {lab(sc, addr)}, frozen by {row['reason'].split(':')[0]}:")
-        for title, bucket in (("ALLOWED before the freeze (would have been signed)", allowed),
-                              ("held by DELAY (the freeze is a new signal, so they are not released)", held)):
+    for br in blast_radius_data(history, sc):
+        lines.append(f"blast radius for {lab(sc, br['address'])}, frozen by {br['frozen_by']}:")
+        for title, key in (("ALLOWED before the freeze (would have been signed)", "allowed"),
+                           ("held by DELAY (the freeze is a new signal, so they are not released)", "held")):
             lines.append(f"  {title}:")
-            if not bucket:
+            rows, tot = br[key], br[f"{key}_totals"]
+            if not rows:
                 lines.append("    nothing")
-            for chain in sorted({k[0] for k in bucket}):
-                parts = []
-                for (c, asset), amt in sorted(bucket.items(), key=lambda kv: (kv[0][0], kv[0][1] != "native", kv[0][1])):
-                    if c == chain:
-                        units = Decimal(amt) / Decimal(10**18)
-                        name = "ETH" if asset == "native" else (sc.label(asset) or asset)
-                        parts.append(f"{units.normalize():f} {name}")
+                continue
+            for chain in tot["chains"]:
+                parts = [f"{r['units']} {r['asset_name']}" for r in rows if r["chain_id"] == chain]
                 lines.append(f"    chain {chain:>6}: " + ", ".join(parts))
-            native = sum(v for (c, a), v in bucket.items() if a == "native")
-            tokens = sum(v for (c, a), v in bucket.items() if a != "native")
-            if bucket:
-                lines.append(f"    total: {Decimal(native) / Decimal(10**18):f} ETH + "
-                             f"{Decimal(tokens) / Decimal(10**18):,f} tokens "
-                             f"({len({a for (_, a) in bucket if a != 'native'})} token types)")
+            lines.append(f"    total: {Decimal(tot['native_units']):f} ETH + {Decimal(tot['token_units']):,f} tokens "
+                         f"({tot['token_types']} token types)")
     return lines
 
 
