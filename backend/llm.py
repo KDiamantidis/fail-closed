@@ -322,6 +322,7 @@ class LLMExplainer:
         if mode == "mock":
             if self.settings.mock_llm_latency_ms > 0:
                 time.sleep(self.settings.mock_llm_latency_ms / 1000)
+            self.usage.attempt(None)
             return mock_assessment(tx, sim, self.settings.mock_llm_escalate_rate)
         if mode == "off":
             log.warning("LLM off (mode=%s, key set=%s): no explanation", self.settings.llm_mode,

@@ -453,9 +453,14 @@ def cmd_loadtest(args) -> int:
     base = Settings(**{**get_settings().model_dump(), "mock_llm_latency_ms": args.latency_ms,
                        "mock_llm_escalate_rate": args.escalate_rate})
     configs = list(CONFIGS) if args.configs == "all" else args.configs.split(",")
-    print(f"Fail Closed | load test {args.normal} normal + 1 attack | configs: {', '.join(configs)} | "
-          f"MOCK LLM {args.latency_ms} ms, escalates {args.escalate_rate:.0%}")
-    results = run_all(base, Path(args.out), args.normal, args.seed, args.concurrency, configs)
+    live = args.llm == "live"
+    if live and not base.vultr_inference_api_key:
+        print("--llm live needs VULTR_INFERENCE_API_KEY (key not set)")
+        return 2
+    llm = (f"REAL LLM {base.vultr_model}" if live
+           else f"MOCK LLM {args.latency_ms} ms, escalates {args.escalate_rate:.0%}")
+    print(f"Fail Closed | load test {args.normal} normal + 1 attack | configs: {', '.join(configs)} | {llm}")
+    results = run_all(base, Path(args.out), args.normal, args.seed, args.concurrency, configs, llm_live=live)
     print("")
     print(markdown_table(results, machine_info()))
     print(f"saved to {args.out}/")
@@ -515,6 +520,8 @@ def main(argv: list[str] | None = None) -> int:
     lt.add_argument("--configs", default="all", help="all, or e.g. fresh/escalation-on,warm/escalation-off")
     lt.add_argument("--latency-ms", type=int, default=800, help="mock LLM latency per call")
     lt.add_argument("--escalate-rate", type=float, default=0.05, help="share of plain transfers the mock escalates")
+    lt.add_argument("--llm", choices=["mock", "live"], default="mock",
+                    help="mock (default) or live: the real Vultr model from .env (costs money)")
     lt.add_argument("--out", default=str(REPO / "docs" / "results"))
     args = ap.parse_args(argv)
     if args.cmd == "loadtest":

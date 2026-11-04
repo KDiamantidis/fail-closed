@@ -70,7 +70,8 @@ export function Simulation() {
         )}
         {sim.summary?.llm && (
           <p className="mt-3 text-[12px] text-muted">
-            Instant checks include the AI's quick look at each request ({sim.summary.llm.mode === "mock" ? "mock, " : ""}{sim.summary.llm.latency_ms} ms here).
+            Instant checks include the AI's quick look at each request
+            ({sim.summary.llm.mode === "mock" ? `mock, ${sim.summary.llm.latency_ms} ms here` : `model ${sim.summary.llm.model}`}).
             The AI can only ask for a sandbox check; it never approves or blocks.
           </p>
         )}

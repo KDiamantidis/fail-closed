@@ -13,8 +13,9 @@ Workload (seeded, reproducible):
   hidden at a random position. It is a wallet that serves no customers in this run, so the
   latched level-2 pause it triggers does not hide false positives on the other wallets.
 
-LLM: the local mock (no Vultr key yet), with MOCK_LLM_LATENCY_MS per call and
-MOCK_LLM_ESCALATE_RATE of plain transfers escalated, so all numbers say "mock LLM".
+LLM: the local mock by default (MOCK_LLM_LATENCY_MS per call, MOCK_LLM_ESCALATE_RATE of plain
+transfers escalated; all numbers then say "mock LLM"), or the real Vultr model with --llm live
+(calls, failures, tokens and estimated cost are reported; the key is never printed).
 """
 
 import json
@@ -147,23 +148,16 @@ def machine_info() -> dict[str, Any]:
 
 def run_config(name: str, overrides: dict, base: Settings, n_normal: int = 500, seed: int = 7,
                concurrency: int = 8, on_result: Callable[[dict], None] | None = None,
-               runner: Any = None, items_state_policy=None, gate: SandboxGate | None = None) -> dict[str, Any]:
+               runner: Any = None, items_state_policy=None, gate: SandboxGate | None = None,
+               llm_live: bool = False) -> dict[str, Any]:
     """Run one config on its own isolated state (in-memory history, its own breaker)."""
     items, state, policy = items_state_policy or build_workload(n_normal, seed)
-    s = Settings(**{**base.model_dump(), **policy, **overrides, "llm_mode": "mock",
+    s = Settings(**{**base.model_dump(), **policy, **overrides, "llm_mode": "live" if llm_live else "mock",
                     "history_db": ":memory:"})
     history = History(":memory:")
     runner = runner or SandboxRunner(s)
     gate = gate or SandboxGate(s.sandbox_max_concurrent, s.sandbox_queue_seconds)
     explainer = LLMExplainer(s)
-    llm_calls = [0]
-    real_assess = explainer.assess
-
-    def counted(*a, **kw):
-        llm_calls[0] += 1
-        return real_assess(*a, **kw)
-
-    explainer.assess = counted
     guard = Guard(s, history, StaticStateProvider(state), runner, explainer, breaker=Breaker(history, s), gate=gate)
     key = GuardKey(Ed25519PrivateKey.generate())
     approver = Approver(key, s.approval_ttl_seconds)
@@ -195,7 +189,9 @@ def run_config(name: str, overrides: dict, base: Settings, n_normal: int = 500, 
             v, path, rules, signed, reasons, detail, timing = "BUSY", "-", ["503"], False, [], str(e), {}
         row = {"i": it.index, "attack": it.attack, "kind": it.kind, "chain": it.tx.chain_id, "verdict": v,
                "path": path, "rules": rules, "signed": signed, "ms": round((time.perf_counter() - t0) * 1000, 1),
-               "escalated": any("LLM asked" in r for r in reasons)}
+               "escalated": any("LLM asked" in r for r in reasons),
+               "ai_unavailable": next((r[len("AI check unavailable ("):].split(")")[0] for r in reasons
+                                       if r.startswith("AI check unavailable")), None)}
         if v != "ALLOW":
             row["detail"] = detail
             row["timings_ms"] = timing
@@ -208,6 +204,7 @@ def run_config(name: str, overrides: dict, base: Settings, n_normal: int = 500, 
     with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="load") as pool:
         list(pool.map(one, items))
     total = time.perf_counter() - t_start
+    guard._explain_pool.shutdown(wait=True)  # background explanations: their calls and tokens count too
     if getattr(runner, "pool", None) is not None:
         pool_stats = dict(runner.pool.stats)
         runner.pool.shutdown()
@@ -237,8 +234,13 @@ def run_config(name: str, overrides: dict, base: Settings, n_normal: int = 500, 
         "sandbox_retries": getattr(runner, "retries", 0),
         "busy_503": sum(1 for r in rows if r["verdict"] == "BUSY"),
         "pool": pool_stats, "pool_warm_up_seconds": round(warm_up, 2),
-        "llm": {"mode": "mock", "calls": llm_calls[0], "latency_ms": s.mock_llm_latency_ms,
-                "escalate_rate": s.mock_llm_escalate_rate},
+        "ai_unavailable": sum(1 for r in rows if r["ai_unavailable"]),
+        "ai_unavailable_by_reason": dict(Counter(r["ai_unavailable"] for r in rows if r["ai_unavailable"])),
+        "llm": {"mode": explainer.mode, "model": s.vultr_model if explainer.mode == "live" else None,
+                "reasoning_effort": s.llm_reasoning_effort if explainer.mode == "live" else None,
+                "latency_ms": s.mock_llm_latency_ms if explainer.mode == "mock" else None,
+                "escalate_rate": s.mock_llm_escalate_rate if explainer.mode == "mock" else None,
+                **explainer.usage.snapshot()},
         "sandbox_timeout_seconds": s.sandbox_timeout_seconds,
     }
 
@@ -249,15 +251,19 @@ def markdown_table(results: list[dict], machine: dict) -> str:
         return "-" if not d["n"] else f"{d['p50']:.0f} / {d['p95']:.0f} / {d['p99']:.0f} (n={d['n']})"
 
     llm = results[0]["llm"]
+    live = llm["mode"] == "live"
+    llm_line = (f"**Real LLM**: Vultr `{llm['model']}`, reasoning_effort {llm['reasoning_effort'] or 'default'}."
+                if live else
+                f"**Mock LLM**: {llm['latency_ms']} ms per call, escalates {llm['escalate_rate']:.0%} of plain transfers.")
     lines = [
         f"**{results[0]['normal']} normal + {results[0]['attacks']} attack**, concurrency {results[0]['concurrency']}. "
         f"Machine: {machine.get('os')}, {machine.get('cpus')} CPUs; Docker {machine.get('docker')} "
         f"({machine.get('docker_os')}, {machine.get('docker_cpus')} CPUs, {machine.get('docker_mem_gib')} GiB). "
-        f"**Mock LLM**: {llm['latency_ms']} ms per call, escalates {llm['escalate_rate']:.0%} of plain transfers.",
+        + llm_line,
         "",
         "| Config | Attack stopped | Normal not ALLOWed | Fast path p50 / p95 / p99 ms | Slow path p50 / p95 / p99 ms "
-        "| Throughput | Total | Sandboxes started |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Throughput | Total | Sandboxes started |" + (" Escalated | AI check unavailable | LLM calls (failed) | Cost |" if live else ""),
+        "|---|---|---|---|---|---|---|---|" + ("---|---|---|---|" if live else ""),
     ]
     for r in results:
         na = r["normal_not_allowed"]
@@ -265,25 +271,40 @@ def markdown_table(results: list[dict], machine: dict) -> str:
         lines.append(
             f"| {r['config']} | {r['attacks_stopped']}/{r['attacks']} | {na}{f' ({why})' if why else ''} "
             f"| {lat(r, 'fast')} | {lat(r, 'slow')} | {r['throughput_rps']} req/s | {r['total_seconds']} s "
-            f"| {r['sandboxes_started']} |")
+            f"| {r['sandboxes_started']} |" + (live_cells(r) if live else ""))
     return "\n".join(lines) + "\n"
 
 
+def live_cells(r: dict) -> str:
+    u = r["llm"]
+    unav = r["ai_unavailable"]
+    why = ", ".join(f"{k} {v}" for k, v in r["ai_unavailable_by_reason"].items())
+    failed = sum(u["failures"].values())
+    cost = f"${u['cost_usd']:.4f}" if u.get("cost_usd") is not None else "n/a"
+    return f" {r['escalated']} | {unav}{f' ({why})' if why else ''} | {u['calls']} ({failed}) | {cost} |"
+
+
 def run_all(base: Settings, out_dir: Path, n_normal: int = 500, seed: int = 7, concurrency: int = 8,
-            configs: list[str] | None = None, progress: Callable[[str], None] = print) -> list[dict]:
+            configs: list[str] | None = None, progress: Callable[[str], None] = print,
+            llm_live: bool = False) -> list[dict]:
     machine = machine_info()
     wl = build_workload(n_normal, seed)
     results = []
     for name in configs or list(CONFIGS):
         progress(f"running {name} ...")
-        r = run_config(name, CONFIGS[name], base, n_normal, seed, concurrency, items_state_policy=wl)
+        r = run_config(name, CONFIGS[name], base, n_normal, seed, concurrency, items_state_policy=wl,
+                       llm_live=llm_live)
+        u = r["llm"]
         progress(f"  done in {r['total_seconds']} s: attack {r['attacks_stopped']}/{r['attacks']}, "
-                 f"normal not allowed {r['normal_not_allowed']}")
+                 f"normal not allowed {r['normal_not_allowed']}, escalated {r['escalated']}, "
+                 f"AI unavailable {r['ai_unavailable']}, LLM calls {u['calls']}"
+                 + (f", cost ${u['cost_usd']:.4f}" if u.get("cost_usd") is not None and llm_live else ""))
         results.append(r)
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     payload = {"machine": machine, "seed": seed, "results": results, "created": stamp,
-               "note": "laptop, Docker Desktop, mock LLM; to be re-run on the Vultr VM"}
+               "note": ("laptop, Docker Desktop, real Vultr model " + str(base.vultr_model) if llm_live
+                        else "laptop, Docker Desktop, mock LLM") + "; to be re-run on the Vultr VM"}
     (out_dir / f"loadtest-{stamp}.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
     md = f"# Load test {stamp}\n\n" + markdown_table(results, machine)
     (out_dir / f"loadtest-{stamp}.md").write_text(md, encoding="utf-8")
