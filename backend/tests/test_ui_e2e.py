@@ -1,9 +1,10 @@
 """The web UI end to end in a real browser (Playwright + Chromium), against a real uvicorn
 serving frontend/dist and real sandboxes.
 
-Runs scenario (a) and (d) through the UI, then the containment panel, at desktop and phone
-width, and fails on any browser console error. With FC_SCREENSHOTS=1 it also saves the
-screenshots to docs/screenshots/.
+At desktop and phone width: replays (a), (d), (e) and (f) through the UI, the review queue
+(approve the honest large withdrawal), the blast radius card, the simulation and the
+containment report. Fails on any browser console error or horizontal scroll. With
+FC_SCREENSHOTS=1 it also saves the screenshots to docs/screenshots/.
 
 Needs: Docker + sandbox image, `npm run build` in frontend/, `python -m playwright install chromium`.
 """
@@ -28,7 +29,7 @@ playwright = pytest.importorskip("playwright.sync_api", reason="pip install play
 if not (DIST / "index.html").exists():
     pytest.skip("frontend not built (cd frontend && npm run build)", allow_module_level=True)
 
-VIEWPORTS = {"desktop": {"width": 1366, "height": 900}, "phone": {"width": 390, "height": 844}}
+VIEWPORTS = {"desktop": {"width": 1440, "height": 900}, "phone": {"width": 390, "height": 844}}
 
 
 def free_port() -> int:
@@ -76,68 +77,131 @@ def open_page(browser, base, viewport):
     errors: list[str] = []
     page.on("console", lambda m: errors.append(f"console.{m.type}: {m.text}") if m.type == "error" else None)
     page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
-    page.goto(base + "/")
-    page.wait_for_selector('[data-testid="chip-llm"] b:text("MOCK")')
+    page.goto(base + "/#/overview")
+    page.wait_for_selector('[data-testid="replay-a_customer_small_withdrawal"]:not([disabled])')
     return page, errors
 
 
-def shot(page, name: str, locator: str | None = None, bottom: str | None = None):
-    """Save a screenshot (FC_SCREENSHOTS=1). `locator` goes near the top of the view; if
-    `bottom` is given and fits, scroll just enough that it is fully visible too."""
+def no_hscroll(page):
+    assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth"), \
+        f"horizontal scroll on {page.url}"
+
+
+def go(page, route: str):
+    page.evaluate(f"location.hash = {route!r}")
+    page.wait_for_timeout(100)
+
+
+def shot(page, name: str, locator: str | None = None, full: bool = False):
+    """Save a screenshot (FC_SCREENSHOTS=1), with `locator` near the top of the view."""
     if os.environ.get("FC_SCREENSHOTS") != "1":
         return
     SHOTS.mkdir(parents=True, exist_ok=True)
     if locator:
         page.locator(locator).first.evaluate("el => el.scrollIntoView({block: 'start'})")
-        page.evaluate("window.scrollBy(0, -12)")
-    if bottom:
-        page.locator(bottom).first.evaluate(
-            "el => { const r = el.getBoundingClientRect(); const over = r.bottom - innerHeight + 16;"
-            " if (over > 0) window.scrollBy(0, over); }")
-    page.wait_for_timeout(250)  # let entry transitions settle
-    page.screenshot(path=str(SHOTS / f"{name}.png"))
+        page.evaluate("window.scrollBy(0, -(document.querySelector('header').offsetHeight + 12))")
+    else:
+        page.evaluate("window.scrollTo(0, 0)")
+    page.wait_for_timeout(300)  # let entry transitions settle
+    page.screenshot(path=str(SHOTS / f"{name}.png"), full_page=full)
 
 
-def run_scenario(page, name: str):
-    page.click(f'[data-testid="scenario-{name}"]')
-    page.wait_for_selector('[data-testid="run"][data-status="done"]', timeout=60_000)
+def replay(page, name: str):
+    """Run a replay from the Overview and open its signing requests."""
+    go(page, "/overview")
+    page.click(f'[data-testid="replay-{name}"]')
+    page.locator(f'[data-testid="replay-outcome-{name}"] a').click(timeout=90_000)
+    page.wait_for_selector('[data-testid="requests"]')
+
+
+def open_first_request(page):
+    page.locator('[data-testid^="request-row"]:visible').first.click()
+    page.wait_for_selector('[data-testid="request-detail"]')
 
 
 @pytest.mark.parametrize("viewport", ["desktop", "phone"])
-def test_ui_scenarios_and_containment(server, browser, viewport):
+def test_ui_console(server, browser, viewport):
     page, errors = open_page(browser, server, viewport)
-    shot(page, f"{viewport}-1-start")
-    assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+    no_hscroll(page)
 
-    # (a) a small customer withdrawal: ALLOW, signed
-    run_scenario(page, "a_customer_small_withdrawal")
-    card = page.locator('[data-testid="request-card"]').first
-    assert card.get_attribute("data-verdict") == "ALLOW"
-    assert card.locator('[data-testid="signer-result"]').inner_text().strip() == "✓ Signed"
+    # (a) a small customer withdrawal: Approved, signed
+    replay(page, "a_customer_small_withdrawal")
+    open_first_request(page)
+    detail = page.locator('[data-testid="request-detail"]')
+    assert detail.get_attribute("data-verdict") == "ALLOW"
+    assert page.locator('[data-testid="verdict-banner"]').inner_text().startswith("Approved")
+    assert page.locator('[data-testid="signer-result"]').inner_text().strip() == "Signed"
 
-    # (d) Binance-style: BLOCK, refused, delegation + probe evidence, explanation arrives later
-    run_scenario(page, "d_binance_7702")
-    card = page.locator('[data-testid="request-card"]').first
-    assert card.get_attribute("data-verdict") == "BLOCK"
-    assert "Refused: no approval from the Guard" in card.locator('[data-testid="signer-result"]').inner_text()
-    assert "EIP-7702 delegation" in card.locator('[data-testid="delegation-line"]').inner_text()
-    assert "sweep() moved 100 ETH" in card.locator('[data-testid="probe-evidence"]').inner_text()
-    page.wait_for_selector('[data-testid="explanation"]:has-text("MOCK")', timeout=20_000)
-    assert page.locator('[data-testid="breaker"] [data-level="2"]').get_attribute("data-on") == "true"
-    shot(page, f"{viewport}-2-scenario-d", '[data-testid="delegation-line"]')
+    # (d) Binance-style: Blocked, signature refused, delegation + probe evidence, AI explains later
+    replay(page, "d_binance_7702")
+    open_first_request(page)
+    assert detail.get_attribute("data-verdict") == "BLOCK"
+    banner = page.locator('[data-testid="verdict-banner"]').inner_text()
+    assert banner.startswith("Blocked: the wallet would hand control to an unknown contract")
+    assert {"R1", "R2"} <= set(page.locator('[data-testid="rule-tag"]').all_inner_texts())
+    assert page.locator('[data-testid="signer-result"]').inner_text().startswith(
+        "Signature refused: no approval from the Guard")
+    assert "Control handed over" in page.locator('[data-testid="delegation-line"]').inner_text()
+    assert "sweep() moved 100 ETH" in page.locator('[data-testid="probe-evidence"]').inner_text()
+    assert "AI explains, it never decides" in page.locator('[data-testid="ai-analysis"]').inner_text()
+    page.wait_for_selector('[data-testid="ai-mock"]', timeout=20_000)
+    page.wait_for_selector('[data-testid="ai-analysis"]:has-text("/100")')
+    no_hscroll(page)
+    shot(page, f"{viewport}-2-binance-detail", full=viewport == "phone")
 
-    # containment panel (REDTEAM_PUBLIC=true here): 7 rows turn CONTAINED
-    page.locator("#containment").scroll_into_view_if_needed()
+    # (e) Mercado-style: the blast radius card
+    replay(page, "e_mercado_multichain")
+    br = page.locator('[data-testid="blast-radius"]')
+    br.wait_for()
+    assert page.locator('[data-testid="br-chains"]').inner_text().startswith("2 of 10")
+    assert "ETH" in page.locator('[data-testid="br-released"]').inner_text()
+    assert "ETH" in page.locator('[data-testid="br-held"]').inner_text()
+    no_hscroll(page)
+    shot(page, f"{viewport}-3-mercado-blast-radius", '[data-testid="blast-radius"]' if viewport == "phone" else None)
+
+    # (f) honest large withdrawal: Needs review -> a person approves -> re-checked and signed
+    replay(page, "f_honest_large_withdrawal")
+    go(page, "/review")
+    item = page.locator('[data-testid="review-item"]').filter(has_text="40 ETH to a customer")
+    item.locator('[data-testid="approve"]').click()
+    decision = item.locator('[data-testid="decision"]')
+    decision.wait_for()
+    assert decision.get_attribute("data-status") == "approved"
+    assert "Signed" in decision.inner_text()
+    # the Mercado replay's held requests, released by the hold worker (wait skipped in the demo)
+    held = page.locator('[data-testid="held-list"]')
+    assert "min skipped" in held.inner_text()
+    no_hscroll(page)
+    shot(page, f"{viewport}-4-review-queue")
+
+    # Overview with the numbers filled in
+    go(page, "/overview")
+    assert int(page.locator('[data-testid="kpi-checked"] p').nth(1).inner_text()) >= 22
+    assert page.locator('[data-testid="kpi-attacks"] p').nth(1).inner_text() != "0"
+    no_hscroll(page)
+    shot(page, f"{viewport}-1-overview")
+
+    # Simulation: 50 withdrawals + 1 attack
+    go(page, "/simulation")
+    page.click('[data-testid="load-run"]')
+    page.wait_for_selector('[data-testid="load-latency"]:has-text("requests/s")', timeout=120_000)
+    assert page.locator('[data-testid="load-attack"] p').nth(1).inner_text() == "Yes"
+    assert page.locator('[data-testid="load-affected"] p').nth(1).inner_text() == "0"
+    assert page.locator('[data-testid="latency-chart"] svg circle').count() >= 51
+    no_hscroll(page)
+    shot(page, f"{viewport}-6-simulation")
+
+    # Containment (REDTEAM_PUBLIC=true here): 7 checks Contained, host health measured
+    go(page, "/containment")
     page.click('[data-testid="redteam-run"]')
-    page.wait_for_selector('[data-testid="redteam-summary"]', timeout=90_000)
-    statuses = page.locator('[data-testid^="payload-"]').evaluate_all("els => els.map(e => e.dataset.status)")
+    page.wait_for_selector('[data-testid="redteam-summary"]', timeout=120_000)
+    statuses = page.locator('[data-testid^="payload-"]:visible').evaluate_all("els => els.map(e => e.dataset.status)")
     assert statuses == ["CONTAINED"] * 7
-    assert page.locator('[data-testid="redteam-summary"]').inner_text() == "All payloads contained."
-    assert "answered" in page.locator('[data-testid="health-pings"]').inner_text()
-    if viewport == "phone":
-        assert page.locator(r'[data-testid="payload-network"] .sm\:hidden').inner_text().endswith("CONTAINED")
-    shot(page, f"{viewport}-3-containment", "#containment",
-         '[data-testid="redteam-summary"]' if viewport == "desktop" else None)
+    assert page.locator('[data-testid="redteam-summary"]').inner_text().startswith("All 7 checks contained.")
+    assert "Contained" in page.locator('[data-testid^="payload-"]:visible').first.inner_text()
+    assert "/" in page.locator('[data-testid="health-pings"]').inner_text()
+    no_hscroll(page)
+    shot(page, f"{viewport}-5-containment")
 
     assert errors == [], errors
     page.close()

@@ -264,15 +264,31 @@ cd backend && .venv/bin/python -m pytest -m docker   # Windows: .venv\Scripts\py
 
 ## Web UI
 
-One page, terminal style (colours and font from our covers). It shows each scenario as a live
-timeline (received → decoded → rules → path → sandbox → diff → findings → verdict → approval →
-signer), the state diff with the `0xef0100` delegation line highlighted, the probe evidence,
-the signer result, and the AI explanation when it arrives. Panels for blast radius, the circuit
-breaker, the red team, the 50 + 1 load demo, and human approval in your own demo run.
+A security operations console for the people who run withdrawals: light theme, Inter for text,
+monospace only for addresses, hashes and diffs. Pages:
 
-| Start | Scenario (d) | Containment |
+- **Overview**: request and verdict counts, attacks stopped, funds protected, customers affected,
+  live activity, the breaker, and the incident replays (Binance-style delegation, Mercado-style
+  multi-chain drain, honest large withdrawal, coordinated attack, and the everyday cases).
+- **Signing requests**: every request with its verdict. The detail view starts with the verdict
+  in plain words and the rule codes, then the check timeline, the sandbox evidence (state diff
+  with the `0xef0100` delegation line highlighted, probe result), the signer outcome, and the AI
+  analysis ("AI explains, it never decides").
+- **Review queue**: approve or reject requests that need a person (in your own demo run), and
+  held requests with their release time.
+- **Circuit breaker** (levels 1-4 in plain words), **Containment** (sandbox isolation report),
+  **Simulation** (50 withdrawals + 1 attack, with a latency chart), **Policies** (the active rules
+  and thresholds, read-only, from `GET /policies`).
+
+| Overview | Binance replay | Mercado blast radius |
 |---|---|---|
-| ![start](docs/screenshots/desktop-1-start.png) | ![scenario d](docs/screenshots/desktop-2-scenario-d.png) | ![containment](docs/screenshots/desktop-3-containment.png) |
+| ![overview](docs/screenshots/desktop-1-overview.png) | ![binance](docs/screenshots/desktop-2-binance-detail.png) | ![mercado](docs/screenshots/desktop-3-mercado-blast-radius.png) |
+
+| Review queue | Containment | Simulation |
+|---|---|---|
+| ![review](docs/screenshots/desktop-4-review-queue.png) | ![containment](docs/screenshots/desktop-5-containment.png) | ![simulation](docs/screenshots/desktop-6-simulation.png) |
+
+Phone versions: `docs/screenshots/phone-*.png`.
 
 Every scenario, load demo and approval runs on its own isolated state, so one visitor never
 changes another visitor's result. The page holds no secrets, and all text from requests, tokens
@@ -285,7 +301,7 @@ npm run build            # -> frontend/dist, served by the API at http://127.0.0
 npm run dev              # development: Vite on :5173, proxies the API on :8000
 ```
 
-The red-team button is live only with `REDTEAM_PUBLIC=true`; otherwise the page shows the last
+The "Run isolation test" button is live only with `REDTEAM_PUBLIC=true`; otherwise the page shows the last
 saved report. Browser test (needs Docker, the built UI and `python -m playwright install chromium`):
 `cd backend && .venv/bin/python -m pytest -m ui` (add `FC_SCREENSHOTS=1` to refresh `docs/screenshots/`).
 
@@ -316,6 +332,7 @@ curl -N localhost:8000/stream                                 # live events (SSE
 | `POST /loadtest/run?normal=50` | The load demo for the UI: N normal + 1 hidden attack on isolated state, one SSE event per request, then the summary (mock LLM, labelled) |
 | `POST /redteam/run`, `GET /redteam/last` | Containment check (SSE, one event per payload); admin unless `REDTEAM_PUBLIC=true` |
 | `GET /status` | For the UI header: sandbox mode, LLM REAL/MOCK, breaker level 0-4 |
+| `GET /policies` | Read-only: the active rules, breaker levels and thresholds in plain words (Policies page) |
 | `GET /demo/{run_id}/pending`, `POST /demo/{run_id}/pending/{id}/approve\|reject` | Human approval inside your own demo run (kept 30 min); never the main state |
 | `GET /guard/public-key`, `GET /health` | The Guard's ed25519 public key; status |
 
