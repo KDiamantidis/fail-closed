@@ -190,7 +190,7 @@ def run_config(name: str, overrides: dict, base: Settings, n_normal: int = 500, 
         row = {"i": it.index, "attack": it.attack, "kind": it.kind, "chain": it.tx.chain_id, "verdict": v,
                "path": path, "rules": rules, "signed": signed, "ms": round((time.perf_counter() - t0) * 1000, 1),
                "escalated": any("LLM asked" in r for r in reasons),
-               "ai_unavailable": next((r[len("AI check unavailable ("):].split(")")[0] for r in reasons
+               "ai_unavailable": next((r[len("AI check unavailable ("):].split(") -> ")[0] for r in reasons
                                        if r.startswith("AI check unavailable")), None)}
         if v != "ALLOW":
             row["detail"] = detail

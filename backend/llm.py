@@ -354,6 +354,8 @@ class LLMExplainer:
                 self.usage.attempt(kind)
                 # the kind and the exception class only: provider messages can echo request data
                 log.warning("LLM attempt %d/%d failed: %s (%s)", i, attempts, kind, type(e).__name__)
+                if kind == "rate limited (429)":
+                    break  # retrying at once only adds load; the caller decides (fast path -> full simulation)
         raise LLMUnavailable(kind)  # never fall back to the mock when a key is set
 
     def _redact(self, s: str) -> str:

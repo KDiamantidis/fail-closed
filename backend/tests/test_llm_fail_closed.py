@@ -86,8 +86,10 @@ def test_unavailable_ai_check_goes_to_full_simulation(behaviour, kind, caplog):
     if r.explanation is not None:  # the background explanation also tries (and fails) once more
         r.explanation.result(timeout=5)
     u = g.explainer.usage.snapshot()
-    assert u["ok"] == 0 and set(u["failures"]) == {kind}  # one retry per call, then give up
-    assert g.explainer.client.calls == u["calls"] and u["calls"] % 2 == 0
+    assert u["ok"] == 0 and set(u["failures"]) == {kind}
+    assert g.explainer.client.calls == u["calls"]
+    per_call = 1 if kind == "rate limited (429)" else 2  # no immediate retry after a 429
+    assert u["calls"] % per_call == 0 and u["calls"] >= per_call
     assert SECRET not in caplog.text and SECRET not in " ".join(r.verdict.path_reasons)
 
 
@@ -140,3 +142,10 @@ def test_request_options_json_mode_and_reasoning_effort():
     assert (u["calls"], u["ok"], u["prompt_tokens"], u["completion_tokens"]) == (1, 1, 1000, 100)
     assert u["cost_usd"] == pytest.approx(1000 * 0.0000001 + 100 * 0.00000035)
     assert e.model_label == "glm-5.3-flash"
+
+
+def test_no_immediate_retry_after_429():
+    s = Settings(vultr_inference_api_key=SECRET, llm_mode="live", llm_max_retries=1)
+    e = LLMExplainer(s, client=FakeClient(raise_429))
+    assert e.assess(req(), None) is None
+    assert e.client.calls == 1 and e.usage.snapshot()["failures"] == {"rate limited (429)": 1}
