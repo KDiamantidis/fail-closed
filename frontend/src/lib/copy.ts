@@ -66,10 +66,27 @@ export function rank(f: any): number {
 }
 
 /** Why the Guard chose this kind of check, in plain words. */
-export function pathWords(path: string): string {
+export function pathWords(path: string, reasons: string[] = []): string {
+  if (reasons.some((r) => r.startsWith("AI check unavailable")))
+    return "A plain transfer, but the AI check was unavailable, so it was run in full simulation instead of being approved instantly.";
+  if (reasons.includes("LLM asked for a deeper check"))
+    return "A plain transfer, but the AI check asked for a closer look, so it was run in full simulation.";
   if (path === "fast") return "A plain transfer within the limits, so no sandbox check was needed.";
   if (path === "early") return "Stopped before the sandbox: the address is frozen or the wallet is paused.";
   return "This is not a plain transfer, so it was first run on an isolated copy of the chain to see what it really does.";
+}
+
+/** The AI check step of the timeline, from the path reasons. */
+export function aiCheckStep(path: string, reasons: string[] = []): { note: string; ran: boolean; warn: boolean } {
+  const unavailable = reasons.find((r) => r.startsWith("AI check unavailable"));
+  if (unavailable) {
+    const why = unavailable.match(/\(([^)]*)\)/)?.[1] ?? "error";
+    return { note: `unavailable (${why}) → full simulation`, ran: true, warn: true };
+  }
+  if (reasons.includes("LLM asked for a deeper check")) return { note: "asked for full simulation", ran: true, warn: true };
+  if (reasons.some((r) => r.startsWith("LLM: no escalation"))) return { note: "no concerns", ran: true, warn: false };
+  if (reasons.includes("LLM escalation off")) return { note: "off", ran: false, warn: false };
+  return { note: path === "early" ? "not needed" : "not needed (rules chose full simulation)", ran: false, warn: false };
 }
 
 /** Incident replays: plain names, featured first. */

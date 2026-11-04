@@ -63,7 +63,7 @@ export function Shell({ children }: { children: ReactNode }) {
             <span className="hidden flex-wrap gap-1.5 md:flex">
               <Pill testid="pill-sandbox">Sandbox: {status ? (status.sandbox_mode === "warm" ? "Warm pool" : "Fresh") : "…"}</Pill>
               <Pill tone={status?.llm === "REAL" ? "ok" : "held"} testid="pill-ai">
-                AI analysis: {status ? (status.llm === "REAL" ? "Live" : status.llm === "MOCK" ? "Mock" : "Off") : "…"}
+                AI analysis: {status ? (status.llm === "REAL" ? status.model : status.llm === "MOCK" ? "Mock" : "Off") : "…"}
               </Pill>
               <Pill tone={level >= 3 ? "bad" : level > 0 ? "held" : "ok"} dot testid="pill-breaker">
                 Breaker: level {level} · {LEVEL_WORD[level]}
@@ -74,7 +74,7 @@ export function Shell({ children }: { children: ReactNode }) {
         {/* phones: status pills and the navigation as a scrollable row */}
         <div className="flex gap-1.5 overflow-x-auto px-4 pb-2 md:hidden">
           <Pill>Sandbox: {status?.sandbox_mode === "warm" ? "Warm" : "Fresh"}</Pill>
-          <Pill tone={status?.llm === "REAL" ? "ok" : "held"}>AI: {status?.llm === "REAL" ? "Live" : "Mock"}</Pill>
+          <Pill tone={status?.llm === "REAL" ? "ok" : "held"}>AI: {status?.llm === "REAL" ? status.model : status?.llm === "OFF" ? "Off" : "Mock"}</Pill>
           <Pill tone={level >= 3 ? "bad" : level > 0 ? "held" : "ok"} dot>Breaker L{level}</Pill>
         </div>
         <nav className="flex gap-1 overflow-x-auto border-t border-border px-3 py-1.5 lg:hidden" aria-label="Sections">

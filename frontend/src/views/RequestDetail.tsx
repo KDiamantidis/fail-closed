@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import { Addr, Card, PageHeader, Pill, verdictTone } from "../components/ui";
 import { eth, hexToInt, humanize, ms, short } from "../lib/api";
-import { headline, PATH_WORD, pathWords, rank, REPLAY_TITLE, ruleReason } from "../lib/copy";
-import { explanationFor, type Row } from "../lib/store";
+import { aiCheckStep, headline, PATH_WORD, pathWords, rank, REPLAY_TITLE, ruleReason } from "../lib/copy";
+import { explanationFor, useStore, type Row } from "../lib/store";
 import { amountText } from "./Requests";
 
 const BANNER: Record<string, string> = {
@@ -28,23 +28,27 @@ function Timeline({ row }: { row: Row }) {
   const t0 = ev.find((e) => e.type === "received")?.ts;
   const at = (type: string) => ev.find((e) => e.type === type)?.ts;
   const fast = row.check.path !== "slow";
+  const ai = aiCheckStep(row.check.path, row.check.path_reasons ?? []);
   const steps = [
     { label: "Received", ts: at("received") },
     { label: "Rules checked", ts: at("request_rules") },
+    { label: "AI check", ts: ai.ran ? at("path") : undefined, skipped: !ai.ran, note: ai.note, warn: ai.warn,
+      always: true },
     { label: "Sandbox", ts: at("sandbox_done"), skipped: fast, note: fast ? "not needed" : undefined },
     { label: "Verdict", ts: at("verdict") },
     { label: "Signer", ts: at("signer") },
   ];
   return (
-    <ol className="grid grid-cols-1 gap-2 sm:grid-cols-5 sm:gap-1" data-testid="timeline">
+    <ol className="grid grid-cols-1 gap-2 sm:grid-cols-6 sm:gap-1" data-testid="timeline">
       {steps.map((s, i) => {
         const done = s.ts != null;
         return (
-          <li key={s.label} className="flex min-w-0 items-center gap-3 sm:block">
+          <li key={s.label} className="flex min-w-0 items-center gap-3 sm:block"
+            data-testid={s.label === "AI check" ? "timeline-ai" : undefined}>
             <div className={`size-2 shrink-0 rounded-full sm:h-1 sm:w-auto ${done ? "bg-brand" : "bg-border"}`} />
             <p className={`flex-1 truncate text-[12px] font-medium sm:mt-2 ${done ? "text-ink" : "text-faint"}`}>{s.label}</p>
-            <p className="text-[12px] tabular-nums text-faint">
-              {s.skipped ? s.note : done && t0 != null ? (i === 0 ? "0 ms" : `+${Math.round((s.ts! - t0) * 1000)} ms`) : "…"}
+            <p className={`text-[12px] tabular-nums ${(s as any).warn ? "text-held" : "text-faint"}`}>
+              {(s as any).always ? s.note : s.skipped ? s.note : done && t0 != null ? (i === 0 ? "0 ms" : `+${Math.round((s.ts! - t0) * 1000)} ms`) : "…"}
             </p>
           </li>
         );
@@ -135,6 +139,7 @@ function plainTitle(row: Row): string {
 }
 
 export function RequestDetail({ row }: { row: Row }) {
+  const { status } = useStore();
   const c = row.check;
   const labels = row.run.scenario.labels ?? {};
   const tone = verdictTone(c.verdict);
@@ -177,7 +182,7 @@ export function RequestDetail({ row }: { row: Row }) {
             </dl>
             <div className="mt-5"><Timeline row={row} /></div>
             <p className="mt-4 text-[13px] text-muted">
-              <span className="font-medium text-body">Why this check: </span>{pathWords(c.path)}
+              <span className="font-medium text-body">Why this check: </span>{pathWords(c.path, c.path_reasons ?? [])}
             </p>
             {c.path_reasons?.length > 0 && (
               <details className="mt-1 text-[12px] text-faint">
@@ -247,7 +252,9 @@ export function RequestDetail({ row }: { row: Row }) {
           </Card>
 
           <Card title="AI analysis" testid="ai-analysis"
-            action={ai?.mock ? <Pill tone="held" testid="ai-mock">Mock</Pill> : ai?.available ? <Pill tone="ok">Live</Pill> : undefined}>
+            action={ai?.mock ? <Pill tone="held" testid="ai-mock">Mock</Pill>
+              : ai?.available ? <Pill tone="neutral" testid="ai-model"><span className="mono">{ai.model ?? status?.model ?? "live model"}</span></Pill>
+              : undefined}>
             <p className="mb-3 rounded-md bg-subtle px-3 py-2 text-[12px] text-muted">
               AI explains, it never decides. The verdict above comes from fixed rules.
             </p>
