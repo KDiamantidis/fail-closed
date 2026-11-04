@@ -58,12 +58,16 @@ export function Load() {
         {stat("customers affected", String(affected), affected ? "text-deny" : "text-signal", "load-affected")}
         {stat("requests", `${rows.length}/51`)}
       </div>
-      <p className="mt-2 text-[12px] text-dim">
+      {rows.length === 0 ? (
+        <p className="mt-2 text-[12px] text-faint">
+          Runs on its own isolated state: 50 customer withdrawals from 3 hot wallets, one Binance-style attack hidden among them.
+        </p>
+      ) : <p className="mt-2 text-[12px] text-dim" data-testid="load-latency">
         fast path p50 {ms(pct(fast, 0.5))} · p95 {ms(pct(fast, 0.95))}
         <span className="text-faint"> ({fast.length})</span> · slow path p50 {ms(pct(slow, 0.5))} · p95 {ms(pct(slow, 0.95))}
         <span className="text-faint"> ({slow.length})</span>
         {summary && <span className="text-faint"> · {summary.throughput_rps} req/s · {summary.sandboxes_started} sandboxes · LLM {summary.llm.mode.toUpperCase()} {summary.llm.latency_ms} ms</span>}
-      </p>
+      </p>}
       {error && <p className="mt-2 text-deny" role="alert">{error}</p>}
     </Section>
   );

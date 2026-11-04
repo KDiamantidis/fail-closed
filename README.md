@@ -262,6 +262,33 @@ Real sandbox tests (need Docker and the sandbox image; skipped otherwise):
 cd backend && .venv/bin/python -m pytest -m docker   # Windows: .venv\Scripts\python -m pytest -m docker
 ```
 
+## Web UI
+
+One page, terminal style (colours and font from our covers). It shows each scenario as a live
+timeline (received → decoded → rules → path → sandbox → diff → findings → verdict → approval →
+signer), the state diff with the `0xef0100` delegation line highlighted, the probe evidence,
+the signer result, and the AI explanation when it arrives. Panels for blast radius, the circuit
+breaker, the red team, the 50 + 1 load demo, and human approval in your own demo run.
+
+| Start | Scenario (d) | Containment |
+|---|---|---|
+| ![start](docs/screenshots/desktop-1-start.png) | ![scenario d](docs/screenshots/desktop-2-scenario-d.png) | ![containment](docs/screenshots/desktop-3-containment.png) |
+
+Every scenario, load demo and approval runs on its own isolated state, so one visitor never
+changes another visitor's result. The page holds no secrets, and all text from requests, tokens
+or the AI is shown as plain text.
+
+```sh
+cd frontend
+npm install
+npm run build            # -> frontend/dist, served by the API at http://127.0.0.1:8000/
+npm run dev              # development: Vite on :5173, proxies the API on :8000
+```
+
+The red-team button is live only with `REDTEAM_PUBLIC=true`; otherwise the page shows the last
+saved report. Browser test (needs Docker, the built UI and `python -m playwright install chromium`):
+`cd backend && .venv/bin/python -m pytest -m ui` (add `FC_SCREENSHOTS=1` to refresh `docs/screenshots/`).
+
 ## API
 
 Runs on the host (not in a container), so it can start sandbox containers itself.
@@ -288,6 +315,8 @@ curl -N localhost:8000/stream                                 # live events (SSE
 | `GET /pending`, `POST /pending/{id}/approve`, `/reject` | NEEDS_HUMAN waits for a human (`X-Admin-Token`). Approve re-checks the rules first; a new freeze/pause/finding turns it into BLOCK. Logged with who and when |
 | `POST /loadtest/run?normal=50` | The load demo for the UI: N normal + 1 hidden attack on isolated state, one SSE event per request, then the summary (mock LLM, labelled) |
 | `POST /redteam/run`, `GET /redteam/last` | Containment check (SSE, one event per payload); admin unless `REDTEAM_PUBLIC=true` |
+| `GET /status` | For the UI header: sandbox mode, LLM REAL/MOCK, breaker level 0-4 |
+| `GET /demo/{run_id}/pending`, `POST /demo/{run_id}/pending/{id}/approve\|reject` | Human approval inside your own demo run (kept 30 min); never the main state |
 | `GET /guard/public-key`, `GET /health` | The Guard's ed25519 public key; status |
 
 At most `SANDBOX_MAX_CONCURRENT` (4) sandboxes run at once; a check waits up to

@@ -1,4 +1,4 @@
-import { eth, hexToInt, ms, short } from "../lib/api";
+import { eth, hexToInt, humanize, ms, short } from "../lib/api";
 import { Addr, VerdictPill } from "./ui";
 
 const FIELD_ORDER = ["code", "nonce", "balance"];
@@ -74,7 +74,7 @@ function ProbeView({ probe, labels }: { probe: any[]; labels: Record<string, str
   );
 }
 
-function Explanation({ ev, pending }: { ev: any; pending: boolean }) {
+function Explanation({ ev, pending, labels }: { ev: any; pending: boolean; labels: Record<string, string> }) {
   if (!ev) {
     return pending ? <p className="mt-3 text-[12px] text-faint">AI explanation… (made after the verdict)</p> : null;
   }
@@ -89,7 +89,7 @@ function Explanation({ ev, pending }: { ev: any; pending: boolean }) {
         <span className="chip">risk {ev.risk_score}/100</span>
         <span className="text-faint">· arrived {ms(ev.ms)} after the verdict</span>
       </div>
-      <p className="whitespace-pre-wrap text-fg">{ev.intent_summary}</p>
+      <p className="whitespace-pre-wrap text-fg" title={ev.intent_summary}>{humanize(ev.intent_summary, labels)}</p>
       <p className="mt-1 whitespace-pre-wrap text-dim">{ev.explanation}</p>
     </div>
   );
@@ -122,7 +122,7 @@ export function RequestCard({ index, item, labels, explanation, held }:
           <VerdictPill v={c.verdict} big />
         </div>
       </div>
-      {c.path_reasons?.[0] && <p className="mt-1 text-[12px] text-faint">why this path: {c.path_reasons.join("; ")}</p>}
+      {c.path_reasons?.[0] && <p className="mt-1 text-[12px] text-faint">why this path: {humanize(c.path_reasons.join("; "), labels)}</p>}
 
       {blocking.length > 0 && (
         <ul className="mt-3 space-y-1.5">
@@ -130,7 +130,7 @@ export function RequestCard({ index, item, labels, explanation, held }:
             <li key={i} className="text-[13px]">
               <VerdictPill v={f.action} /> <span className="text-faint">{f.rule_id}</span>{" "}
               <span className="text-fg">{f.title}</span>
-              {f.detail && <span className="block pl-1 text-[12px] text-dim hex">{f.detail}</span>}
+              {f.detail && <span className="block pl-1 text-[12px] text-dim hex" title={f.detail}>{humanize(f.detail, labels)}</span>}
             </li>
           ))}
         </ul>
@@ -141,12 +141,12 @@ export function RequestCard({ index, item, labels, explanation, held }:
       {sim && !sim.ok && <p className="mt-3 text-[12px] text-deny">sandbox failed → R0 BLOCK: {sim.error}</p>}
 
       {(c.breaker ?? []).map((b: string, i: number) => (
-        <p key={i} className="mt-2 text-[12px] text-hold">breaker: {b}</p>
+        <p key={i} className="mt-2 text-[12px] text-hold">breaker: {humanize(b, labels)}</p>
       ))}
       {held && (
         <p className="mt-2 text-[12px] text-hold" data-testid="delay-outcome">
           after the hold ({held.skipped} min skipped by the demo): <b>{String(held.status).toUpperCase()}</b>
-          {held.signed ? " · signed" : " · not signed"} — {held.reason}
+          {held.signed ? " · signed" : " · not signed"} — {humanize(held.reason, labels)}
         </p>
       )}
 
@@ -154,7 +154,7 @@ export function RequestCard({ index, item, labels, explanation, held }:
         className={`mt-3 text-[20px] font-bold leading-tight sm:text-[22px] ${signed ? "text-signal" : "text-deny"}`}>
         {signed ? "✓ Signed" : `✕ Refused: ${reason}`}
       </p>
-      <Explanation ev={explanation} pending={!!c.explanation_pending} />
+      <Explanation ev={explanation} pending={!!c.explanation_pending} labels={labels} />
     </article>
   );
 }

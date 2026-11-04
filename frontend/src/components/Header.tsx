@@ -21,7 +21,7 @@ export function Header({ status }: { status: Status | null }) {
             <i className="size-2.5 rounded-full bg-[#febc2e]" />
             <i className="size-2.5 rounded-full bg-[#28c840]" />
           </span>
-          <span className="text-[12px] text-faint">guard@fail-closed:~</span>
+          <span className="hidden text-[12px] text-faint sm:inline">guard@fail-closed:~</span>
         </div>
         <div className="flex flex-wrap justify-end gap-1.5" aria-label="System status">
           <span className="chip" data-testid="chip-sandbox">sandbox <b className="text-fg">{status?.sandbox_mode ?? "…"}</b></span>

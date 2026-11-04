@@ -9,7 +9,7 @@ const PAYLOADS: [string, string][] = [
 
 interface Ping { ok: boolean; ms: number }
 
-export function Containment({ publicRun }: { publicRun: boolean }) {
+export function Containment({ publicRun, known }: { publicRun: boolean; known: boolean }) {
   const [rows, setRows] = useState<Record<string, any>>({});
   const [state, setState] = useState<"idle" | "running" | "done" | "error" | "saved">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -19,13 +19,14 @@ export function Containment({ publicRun }: { publicRun: boolean }) {
 
   // not allowed to run live: show the last saved report
   useEffect(() => {
-    if (publicRun) return;
+    if (!known || publicRun) return;
     getJSON("/redteam/last").then((rep) => {
+      if (!rep.available) return;
       setRows(Object.fromEntries(rep.results.map((r: any) => [r.name, { ...r, contained: r.contained ? "yes" : "no" }])));
       setSummary({ all_contained: rep.all_contained, red: rep.red, saved_at: rep.ts });
       setState("saved");
-    }).catch(() => { /* no report yet */ });
-  }, [publicRun]);
+    }).catch(() => { /* API down: the panel stays empty */ });
+  }, [publicRun, known]);
 
   useEffect(() => () => { if (timer.current) window.clearInterval(timer.current); }, []);
 
@@ -67,10 +68,18 @@ export function Containment({ publicRun }: { publicRun: boolean }) {
           {PAYLOADS.map(([name, label]) => {
             const r = rows[name];
             const status = r ? (r.contained === "yes" ? "CONTAINED" : "NOT CONTAINED") : state === "running" ? "running…" : "—";
+            const statusEl = (cls: string) => (
+              <span className={`text-[13px] font-bold ${cls} ${status === "CONTAINED" ? "text-signal" : status === "NOT CONTAINED" ? "text-deny" : "text-faint"}`}>
+                {status === "CONTAINED" ? "✓ " : status === "NOT CONTAINED" ? "✕ " : ""}{status}
+              </span>
+            );
             return (
               <li key={name} data-testid={`payload-${name}`} data-status={status}
                 className="grid grid-cols-1 gap-1 border-b border-line/60 px-4 py-2.5 last:border-0 sm:grid-cols-[150px_1fr_130px] sm:gap-4">
-                <span className="font-bold text-fg">{label}</span>
+                {/* phones: the status sits next to the name, so it is seen first */}
+                <span className="flex items-baseline justify-between gap-3">
+                  <span className="font-bold text-fg">{label}</span>{statusEl("sm:hidden")}
+                </span>
                 <span className="min-w-0 text-[12px]">
                   {r ? (
                     <>
@@ -81,9 +90,7 @@ export function Containment({ publicRun }: { publicRun: boolean }) {
                     </>
                   ) : <span className="text-faint">waiting</span>}
                 </span>
-                <span className={`text-[13px] font-bold sm:text-right ${status === "CONTAINED" ? "text-signal" : status === "NOT CONTAINED" ? "text-deny" : "text-faint"}`}>
-                  {status === "CONTAINED" ? "✓ " : status === "NOT CONTAINED" ? "✕ " : ""}{status}
-                </span>
+                {statusEl("hidden sm:block sm:text-right")}
               </li>
             );
           })}

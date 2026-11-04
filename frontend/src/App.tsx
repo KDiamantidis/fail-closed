@@ -39,7 +39,7 @@ export default function App() {
         <Breaker state={result ? result.breaker : mainBreaker}
           source={result ? `your demo run (${run!.scenario.name.slice(0, 1)})` : "main state"} labels={labels} />
         <Pending runId={result ? run!.runId : null} initial={result?.pending ?? []} labels={labels} />
-        <Containment publicRun={!!status?.redteam_public} />
+        <Containment publicRun={!!status?.redteam_public} known={status !== null} />
         <Load />
       </main>
       <footer className="border-t border-line bg-chrome">

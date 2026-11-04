@@ -95,6 +95,14 @@ export function short(addr: string | null | undefined): string {
   return /^0x[0-9a-fA-F]{40}$/.test(addr) ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr;
 }
 
+/** Plain-text clean-up of server text: long addresses become 0x1234…abcd (label). Text in, text out. */
+export function humanize(text: string, labels: Record<string, string> = {}): string {
+  return String(text ?? "").replace(/0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/g, (a) => {
+    const label = labels[a.toLowerCase()];
+    return `${short(a)}${label ? ` (${label})` : ""}`;
+  });
+}
+
 export function eth(wei: string | number | bigint): string {
   let v: bigint;
   try { v = BigInt(wei); } catch { return String(wei); }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { eth, getJSON, postJSON } from "../lib/api";
+import { eth, getJSON, humanize, postJSON } from "../lib/api";
 import { Addr, Section } from "./ui";
 
 export function Pending({ runId, initial, labels }: { runId: string | null; initial: any[]; labels: Record<string, string> }) {
@@ -33,7 +33,7 @@ export function Pending({ runId, initial, labels }: { runId: string | null; init
               <p className="text-dim">
                 {eth(p.request.value)} from <Addr a={p.request.from} labels={labels} /> to <Addr a={p.request.to} labels={labels} />
               </p>
-              <p className="text-[12px] text-faint hex">{p.reasons[0]}</p>
+              <p className="text-[12px] text-faint hex">{humanize(p.reasons[0], labels)}</p>
             </div>
             <div className="flex gap-2">
               <button type="button" className="btn btn-signal" onClick={() => decide(p.id, "approve")} data-testid="approve">Approve</button>
@@ -47,7 +47,7 @@ export function Pending({ runId, initial, labels }: { runId: string | null; init
             {r.status === "blocked" && "Not approved: "}
             {r.status === "rejected" && "Rejected. "}
             <b>{r.signed ? "Signed" : "Not signed"}</b>
-            {r.reason ? <span className="block text-[12px] text-dim">{r.reason}</span> : null}
+            {r.reason ? <span className="block text-[12px] text-dim">{humanize(r.reason, labels)}</span> : null}
           </p>
         ))}
         {error && <p className="text-deny" role="alert">{error}</p>}

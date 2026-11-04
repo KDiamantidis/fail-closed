@@ -213,7 +213,7 @@ def test_api_redteam_stream_and_last(tmp_path):
     svc.health_probe = lambda: {"ok": True}
     svc.make_redteam = lambda probe: RedTeam(svc.settings, client=FakeClient(), health_probe=probe)
     assert c.post("/redteam/run").status_code == 401
-    assert c.get("/redteam/last").status_code == 404
+    assert c.get("/redteam/last").json() == {"available": False}
     with c.stream("POST", "/redteam/run", headers={"X-Admin-Token": ADMIN}) as r:
         body = "".join(r.iter_text())
     events = [ln[6:] for ln in body.splitlines() if ln.startswith("data: ")]
@@ -223,7 +223,7 @@ def test_api_redteam_stream_and_last(tmp_path):
     assert all(e["contained"] == "yes" and "tried" in e and "seconds" in e for e in payload_events)
     assert json.loads(events[-1])["all_contained"] is True
     last = c.get("/redteam/last").json()
-    assert last["all_contained"] and len(last["results"]) == 7
+    assert last["available"] and last["all_contained"] and len(last["results"]) == 7
 
 
 # --- real Docker --------------------------------------------------------------------------------
@@ -235,3 +235,17 @@ def test_real_sandbox_contains_every_payload():
     rep = RedTeam(s, health_probe=lambda: calls.append(1) or {"ok": True}).run()
     assert rep["all_contained"], [(r["name"], r["result"]) for r in rep["results"] if not r["contained"]]
     assert calls  # the host was probed during the bombs
+
+
+@pytest.mark.skipif(not SCENARIOS.exists(), reason="scenarios/ not available")
+def test_api_redteam_works_with_the_default_health_probe(tmp_path):
+    """Regression: Services.health_probe was never set, so a live run without a test override
+    crashed with AttributeError (500)."""
+    c, svc = client(tmp_path, runner=FakeRunner(), admin_token=ADMIN)
+    assert svc.health_probe is None
+    used = []
+    svc.make_redteam = lambda probe: used.append(probe) or RedTeam(svc.settings, client=FakeClient())
+    with c.stream("POST", "/redteam/run", headers={"X-Admin-Token": ADMIN}) as r:
+        assert r.status_code == 200
+        body = "".join(r.iter_text())
+    assert "redteam_finished" in body and callable(used[0])

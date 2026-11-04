@@ -126,6 +126,7 @@ class Services:
         self.redteam_lock = threading.Lock()  # one red-team run at a time
         self.loadtest_lock = threading.Lock()  # one load demo at a time
         self.loadtest_runner: Any = None  # override in tests; default: a real SandboxRunner
+        self.health_probe: Any = None  # override in tests; default: HTTP GET of our own /health
         # Demo runs stay alive for a while so a visitor can approve/reject NEEDS_HUMAN items in
         # THEIR OWN isolated run (never the main state). Bounded: oldest runs are dropped.
         self.demo_runs: "OrderedDict[str, tuple[Services, float]]" = OrderedDict()
@@ -146,7 +147,6 @@ class Services:
         if entry is None or entry[1] < time.time():
             raise HTTPException(status_code=404, detail="demo run not found or expired; run the scenario again")
         return entry[0]
-        self.health_probe: Any = None  # override in tests; default: HTTP GET of our own /health
 
     def make_redteam(self, probe) -> RedTeam:
         return RedTeam(self.settings, health_probe=probe, gate=self.guard.gate)
@@ -401,9 +401,9 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.get("/redteam/last")
     def redteam_last() -> dict:
         last = svc.history.last_redteam()
-        if last is None:
-            raise HTTPException(status_code=404, detail="no red-team run yet")
-        return last
+        if last is None:  # a normal state, not an error
+            return {"available": False}
+        return {"available": True, **last}
 
     @app.post("/breaker/reset")
     def reset(body: ResetRequest, x_admin_token: str | None = Header(default=None)) -> dict:

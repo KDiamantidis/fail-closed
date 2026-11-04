@@ -1,3 +1,4 @@
+import { humanize } from "../lib/api";
 import { Addr, Section } from "./ui";
 
 const LEVELS = [
@@ -33,7 +34,7 @@ export function Breaker({ state, source, labels }:
                       {l.key === "paused_wallets" && <Addr a={it.wallet} labels={labels} />}
                       {l.key === "safe_mode_chains" && <span>chain {it.chain_id}</span>}
                       {l.key === "global_stop" && <span>{it.signals?.join(" + ")}</span>}
-                      <span className="block text-faint">{it.reason}</span>
+                      <span className="block text-faint">{humanize(it.reason, labels)}</span>
                     </li>
                   ))}
                 </ul>
