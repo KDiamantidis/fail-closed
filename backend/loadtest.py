@@ -7,7 +7,9 @@ latency p50/p95/p99 per path, throughput, total time, sandboxes started.
 Workload (seeded, reproducible):
 - 3 customer hot wallets; ~55% native ETH, ~45% transfers of 3 MockTokens
 - chains 1 / 10 / 42161 / 137; amounts log-normal (ETH ~0.3, tokens ~500 units)
-- many destinations: ~70% one-off addresses, ~30% returning customers (each on one chain)
+- destinations: ~90% returning customers (each tied to one wallet and one chain, paid before:
+  the run starts with one earlier payout per returning customer in its history, a week back),
+  ~10% (NEW_DEST_SHARE) addresses the wallet never paid, so the AI escalation policy is used
 - spread over 10 simulated hours (the history windows see realistic timing)
 - the attack: a 4th hot wallet is asked to sign 3 EIP-7702 authorizations to a sweeper,
   hidden at a random position. It is a wallet that serves no customers in this run, so the
@@ -40,7 +42,7 @@ from app.models import Decision, TxRequest
 from approval import Approver, GuardKey
 from breaker import Breaker
 from guard import Guard
-from history import History
+from history import CheckRecord, History
 from llm import LLMExplainer
 from sandbox_gate import GuardBusy, SandboxGate
 from sandbox_runner import SandboxRunner
@@ -73,23 +75,25 @@ class Item:
     tx: TxRequest
     attack: bool
     kind: str
+    new_dest: bool = False  # a destination this wallet never paid before (the AI check is asked)
 
 
 def _addr(rng: random.Random) -> str:
     return "0x" + "".join(rng.choice("0123456789abcdef") for _ in range(40))
 
 
-def build_workload(n_normal: int = 500, seed: int = 7, hours: float = 10.0) -> tuple[list[Item], StartingState, dict]:
+def build_workload(n_normal: int = 500, seed: int = 7, hours: float = 10.0,
+                   new_dest_share: float = 0.1) -> tuple[list[Item], StartingState, dict]:
     rng = random.Random(seed)
-    regulars = [(_addr(rng), rng.choices(CHAINS, CHAIN_WEIGHTS)[0]) for _ in range(60)]
+    regulars = [(_addr(rng), rng.choices(CHAINS, CHAIN_WEIGHTS)[0], rng.choice(HOT)) for _ in range(200)]
     times = sorted(rng.uniform(0, hours * 3600) for _ in range(n_normal))
     items: list[Item] = []
     for i, t in enumerate(times):
-        if rng.random() < 0.3:
-            dest, chain = rng.choice(regulars)
+        new = rng.random() < new_dest_share
+        if new:
+            dest, chain, wallet = _addr(rng), rng.choices(CHAINS, CHAIN_WEIGHTS)[0], rng.choice(HOT)
         else:
-            dest, chain = _addr(rng), rng.choices(CHAINS, CHAIN_WEIGHTS)[0]
-        wallet = rng.choice(HOT)
+            dest, chain, wallet = rng.choice(regulars)
         if rng.random() < 0.55:
             wei = int(min(8.0, max(0.005, rng.lognormvariate(math.log(0.3), 1.0))) * ETH)
             body = {"to": dest, "value": str(wei), "data": "0x"}
@@ -101,7 +105,7 @@ def build_workload(n_normal: int = 500, seed: int = 7, hours: float = 10.0) -> t
             body = {"to": token, "value": "0", "data": data}
             kind = TOKENS[token]
         tx = TxRequest.model_validate({"wallet_type": "customer_hot", "chain_id": chain, "from": wallet, **body})
-        items.append(Item(i, t, tx, False, kind))
+        items.append(Item(i, t, tx, False, kind, new))
 
     pos = rng.randrange(1, n_normal)
     t_attack = (items[pos - 1].t + items[pos].t) / 2
@@ -121,6 +125,23 @@ def build_workload(n_normal: int = 500, seed: int = 7, hours: float = 10.0) -> t
         accounts[t] = {"code": "artifact:MockToken"}
     policy = {"known_tokens": list(TOKENS)}
     return items, StartingState.model_validate({"accounts": accounts}), policy
+
+
+def dest_of(it: Item) -> str:
+    return it.tx.to if it.kind == "native" else "0x" + it.tx.data[34:74]
+
+
+def seed_known_payouts(history: History, items: list[Item]) -> int:
+    """One earlier small payout (a week before the run, outside every rule window) per returning
+    customer, so "a destination this wallet paid before" means the same as in production."""
+    known = sorted({(it.tx.from_, dest_of(it), it.tx.chain_id) for it in items if not it.attack and not it.new_dest})
+    for n, (wallet, dest, chain) in enumerate(known):
+        history.record_check(CheckRecord(
+            id=f"seed-{n}", ts=T0 - 7 * 86400, wallet=wallet, chain_id=chain, wallet_type="customer_hot",
+            kind="native_transfer", destination=dest, asset="native", amount=10**16, path="fast",
+            path_reasons=["earlier payout (load-test history seed)"], verdict="ALLOW", findings=[], timings={},
+            llm=None, request={}))
+    return len(known)
 
 
 def _pct(values: list[float], q: float) -> float | None:
@@ -155,6 +176,7 @@ def run_config(name: str, overrides: dict, base: Settings, n_normal: int = 500, 
     s = Settings(**{**base.model_dump(), **policy, **overrides, "llm_mode": "live" if llm_live else "mock",
                     "history_db": ":memory:"})
     history = History(":memory:")
+    seed_known_payouts(history, items)
     runner = runner or SandboxRunner(s)
     gate = gate or SandboxGate(s.sandbox_max_concurrent, s.sandbox_queue_seconds)
     explainer = LLMExplainer(s)
@@ -188,6 +210,7 @@ def run_config(name: str, overrides: dict, base: Settings, n_normal: int = 500, 
         except GuardBusy as e:
             v, path, rules, signed, reasons, detail, timing = "BUSY", "-", ["503"], False, [], str(e), {}
         row = {"i": it.index, "attack": it.attack, "kind": it.kind, "chain": it.tx.chain_id, "verdict": v,
+               "new_dest": it.new_dest, "ai_asked": any(r.endswith(": AI check asked") for r in reasons),
                "path": path, "rules": rules, "signed": signed, "ms": round((time.perf_counter() - t0) * 1000, 1),
                "escalated": any("LLM asked" in r for r in reasons),
                "ai_unavailable": next((r[len("AI check unavailable ("):].split(") -> ")[0] for r in reasons
@@ -227,6 +250,8 @@ def run_config(name: str, overrides: dict, base: Settings, n_normal: int = 500, 
         "normal_signed": sum(1 for r in normal if r["signed"]),
         "paths": dict(Counter(r["path"] for r in rows)),
         "escalated": sum(1 for r in rows if r["escalated"]),
+        "new_destinations": sum(1 for r in normal if r["new_dest"]),
+        "ai_asked": sum(1 for r in rows if r["ai_asked"]),
         "latency_ms": {p: {"n": len(v), "p50": _pct(v, .5), "p95": _pct(v, .95), "p99": _pct(v, .99),
                            "mean": round(statistics.mean(v), 1) if v else None} for p, v in lat.items()},
         "total_seconds": round(total, 2), "throughput_rps": round(len(rows) / total, 1),
@@ -262,8 +287,10 @@ def markdown_table(results: list[dict], machine: dict) -> str:
         + llm_line,
         "",
         "| Config | Attack stopped | Normal not ALLOWed | Fast path p50 / p95 / p99 ms | Slow path p50 / p95 / p99 ms "
-        "| Throughput | Total | Sandboxes started |" + (" Escalated | AI check unavailable | LLM calls (failed) | Cost |" if live else ""),
-        "|---|---|---|---|---|---|---|---|" + ("---|---|---|---|" if live else ""),
+        "| Throughput | Total | Sandboxes started |"
+        + (" New destinations | AI asked | Escalated | AI check unavailable | LLM calls (failed) | 429s | Cost |"
+           if live else ""),
+        "|---|---|---|---|---|---|---|---|" + ("---|---|---|---|---|---|---|" if live else ""),
     ]
     for r in results:
         na = r["normal_not_allowed"]
@@ -281,14 +308,16 @@ def live_cells(r: dict) -> str:
     why = ", ".join(f"{k} {v}" for k, v in r["ai_unavailable_by_reason"].items())
     failed = sum(u["failures"].values())
     cost = f"${u['cost_usd']:.4f}" if u.get("cost_usd") is not None else "n/a"
-    return f" {r['escalated']} | {unav}{f' ({why})' if why else ''} | {u['calls']} ({failed}) | {cost} |"
+    n429 = u["failures"].get("rate limited (429)", 0)
+    return (f" {r['new_destinations']} | {r['ai_asked']} | {r['escalated']} | {unav}{f' ({why})' if why else ''} "
+            f"| {u['calls']} ({failed}) | {n429} | {cost} |")
 
 
 def run_all(base: Settings, out_dir: Path, n_normal: int = 500, seed: int = 7, concurrency: int = 8,
             configs: list[str] | None = None, progress: Callable[[str], None] = print,
-            llm_live: bool = False) -> list[dict]:
+            llm_live: bool = False, new_dest_share: float = 0.1) -> list[dict]:
     machine = machine_info()
-    wl = build_workload(n_normal, seed)
+    wl = build_workload(n_normal, seed, new_dest_share=new_dest_share)
     results = []
     for name in configs or list(CONFIGS):
         progress(f"running {name} ...")
