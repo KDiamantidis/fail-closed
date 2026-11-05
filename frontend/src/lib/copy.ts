@@ -66,11 +66,23 @@ export function rank(f: any): number {
 }
 
 /** Why the Guard chose this kind of check, in plain words. */
+/** Why the AI was or was not asked on the fast path (the escalation policy), in plain words. */
+export function aiAskedWhy(reasons: string[] = []): string | undefined {
+  const r = reasons.find((x) => x.endsWith(": AI check asked") || x.endsWith(": AI check not needed"));
+  return r?.split(": AI check")[0];
+}
+
 export function pathWords(path: string, reasons: string[] = []): string {
+  const why = aiAskedWhy(reasons);
+  const asked = why ? ` (${why.charAt(0).toLowerCase() + why.slice(1)})` : "";
   if (reasons.some((r) => r.startsWith("AI check unavailable")))
-    return "A plain transfer, but the AI check was unavailable, so it was run in full simulation instead of being approved instantly.";
+    return `A plain transfer${asked}, but the AI check was unavailable, so it was run in full simulation instead of being approved instantly.`;
   if (reasons.includes("LLM asked for a deeper check"))
-    return "A plain transfer, but the AI check asked for a closer look, so it was run in full simulation.";
+    return `A plain transfer${asked}, but the AI check asked for a closer look, so it was run in full simulation.`;
+  if (path === "fast" && reasons.some((r) => r.endsWith("AI check not needed")))
+    return "A plain transfer to a destination this wallet has paid before, for a small amount: the rules alone decided, no AI check or sandbox needed.";
+  if (path === "fast" && why)
+    return `A plain transfer${asked}: the AI check saw no concerns, so no sandbox check was needed.`;
   if (path === "fast") return "A plain transfer within the limits, so no sandbox check was needed.";
   if (path === "early") return "Stopped before the sandbox: the address is frozen or the wallet is paused.";
   return "This is not a plain transfer, so it was first run on an isolated copy of the chain to see what it really does.";
@@ -80,9 +92,11 @@ export function pathWords(path: string, reasons: string[] = []): string {
 export function aiCheckStep(path: string, reasons: string[] = []): { note: string; ran: boolean; warn: boolean } {
   const unavailable = reasons.find((r) => r.startsWith("AI check unavailable"));
   if (unavailable) {
-    const why = unavailable.match(/\(([^)]*)\)/)?.[1] ?? "error";
+    const why = unavailable.slice("AI check unavailable (".length).split(") -> ")[0] || "error";
     return { note: `unavailable (${why}) → full simulation`, ran: true, warn: true };
   }
+  if (reasons.some((r) => r.endsWith("AI check not needed")))
+    return { note: "not needed: known destination, small amount", ran: false, warn: false };
   if (reasons.includes("LLM asked for a deeper check")) return { note: "asked for full simulation", ran: true, warn: true };
   if (reasons.some((r) => r.startsWith("LLM: no escalation"))) return { note: "no concerns", ran: true, warn: false };
   if (reasons.includes("LLM escalation off")) return { note: "off", ran: false, warn: false };

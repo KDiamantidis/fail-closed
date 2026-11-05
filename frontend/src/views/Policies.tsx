@@ -53,7 +53,13 @@ export function Policies() {
                 <div className="flex justify-between gap-3"><dt className="text-muted">Sandbox time limit</dt><dd className="text-ink">{p.sandbox.timeout_seconds} s</dd></div>
                 <div className="flex justify-between gap-3"><dt className="text-muted">Sandbox checks at once</dt><dd className="text-ink">{p.sandbox.max_concurrent}</dd></div>
                 <div className="flex justify-between gap-3"><dt className="text-muted">AI may ask for a sandbox check</dt><dd className="text-ink">{p.ai.escalation_on_fast_path ? "Yes" : "No"}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-muted">AI asked above</dt><dd className="text-ink" data-testid="policy-ai-pct">{p.ai.ask_above_pct}% of the wallet balance, or a new destination</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-muted">AI checks at once</dt><dd className="text-ink">{p.ai.max_concurrent}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-muted">AI check time limit</dt><dd className="text-ink">{p.ai.fast_path_timeout_seconds} s, then full simulation</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-muted">AI check model</dt><dd className="mono text-ink">{p.ai.fast_model}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-muted">Explanation model</dt><dd className="mono text-ink">{p.ai.explain_model}</dd></div>
               </dl>
+              <p className="mt-3 text-[12px] text-muted">{p.ai.policy} AI explains, it never decides.</p>
             </Card>
           </div>
         </div>

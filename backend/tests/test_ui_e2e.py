@@ -132,6 +132,12 @@ def test_ui_console(server, browser, viewport):
     assert page.locator('[data-testid="verdict-banner"]').inner_text().startswith("Approved")
     assert page.locator('[data-testid="signer-result"]').inner_text().strip() == "Signed"
     assert "no concerns" in page.locator('[data-testid="timeline-ai"]').inner_text()  # the fast-path AI check
+    assert "new destination for this wallet" in detail.inner_text()  # why the AI was asked (policy)
+
+    # Policies: the escalation threshold is a visible policy value
+    go(page, "/policies")
+    page.wait_for_selector('[data-testid="policy-ai-pct"]')
+    assert page.locator('[data-testid="policy-ai-pct"]').inner_text().startswith("10% of the wallet balance")
 
     # (d) Binance-style: Blocked, signature refused, delegation + probe evidence, AI explains later
     replay(page, "d_binance_7702")
