@@ -136,7 +136,7 @@ def container_options(settings: Settings) -> dict[str, Any]:
         "security_opt": ["no-new-privileges"],
         "privileged": False,
         "environment": {},
-        "labels": {LABEL: "1"},
+        "labels": {LABEL: "1", **({"fail-closed.owner": settings.sandbox_owner} if settings.sandbox_owner else {})},
     }
 
 

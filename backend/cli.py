@@ -450,17 +450,58 @@ def cmd_redteam(health_url: str | None) -> int:
 def cmd_loadtest(args) -> int:
     from loadtest import CONFIGS, markdown_table, machine_info, run_all
 
+    import threading
+
+    import loadtest_safety as safety
+
+    free = safety.free_ram_gb()
+    free_txt = "unknown" if free is None else f"{free:.1f} GB"
+    if free is None or free < args.min_free_gb:
+        print(f"refusing to start: free RAM {free_txt}, need at least {args.min_free_gb:g} GB "
+              "(close other programs, or lower --min-free-gb at your own risk)")
+        return 2
+    owner = safety.owner_for()
     base = Settings(**{**get_settings().model_dump(), "mock_llm_latency_ms": args.latency_ms,
-                       "mock_llm_escalate_rate": args.escalate_rate})
+                       "mock_llm_escalate_rate": args.escalate_rate, "sandbox_owner": owner,
+                       **({"ai_check_concurrency": args.ai_concurrency} if args.ai_concurrency else {})})
     configs = list(CONFIGS) if args.configs == "all" else args.configs.split(",")
     live = args.llm == "live"
     if live and not base.vultr_inference_api_key:
         print("--llm live needs VULTR_INFERENCE_API_KEY (key not set)")
         return 2
-    llm = (f"REAL LLM {base.vultr_model}" if live
+    try:
+        import docker
+
+        client_factory = docker.from_env
+        stale = safety.remove_containers(client_factory(), stale=True)
+    except Exception as e:  # noqa: BLE001 - the run itself will report Docker problems
+        client_factory, stale = None, 0
+        print(f"note: could not check for leftover containers ({type(e).__name__})")
+    if client_factory is not None:
+        safety.Cleanup(owner, client_factory).install()
+    llm = (f"REAL LLM {base.vultr_model}, AI concurrency {base.ai_check_concurrency}" if live
            else f"MOCK LLM {args.latency_ms} ms, escalates {args.escalate_rate:.0%}")
     print(f"Fail Closed | load test {args.normal} normal + 1 attack | configs: {', '.join(configs)} | {llm}")
-    results = run_all(base, Path(args.out), args.normal, args.seed, args.concurrency, configs, llm_live=live)
+    print(f"free RAM {free_txt}; containers labelled fail-closed.owner={owner}"
+          + (f"; removed {stale} left over by an earlier run" if stale else ""))
+    out: dict = {}
+
+    def work() -> None:
+        try:
+            out["results"] = run_all(base, Path(args.out), args.normal, args.seed, args.concurrency, configs,
+                                     llm_live=live, new_dest_share=args.new_dest_share)
+        except BaseException as e:  # noqa: BLE001 - reported below
+            out["error"] = e
+
+    # The run is in a worker thread; the main thread only waits in short steps, so Ctrl+C and
+    # SIGTERM are handled at once (cleanup, then exit) even while every worker is blocked.
+    t = threading.Thread(target=work, name="loadtest-main", daemon=True)
+    t.start()
+    while t.is_alive():
+        t.join(0.5)
+    if "error" in out:
+        raise out["error"]
+    results = out["results"]
     print("")
     print(markdown_table(results, machine_info()))
     print(f"saved to {args.out}/")
@@ -520,6 +561,10 @@ def main(argv: list[str] | None = None) -> int:
     lt.add_argument("--configs", default="all", help="all, or e.g. fresh/escalation-on,warm/escalation-off")
     lt.add_argument("--latency-ms", type=int, default=800, help="mock LLM latency per call")
     lt.add_argument("--escalate-rate", type=float, default=0.05, help="share of plain transfers the mock escalates")
+    lt.add_argument("--min-free-gb", type=float, default=2.0, help="refuse to start with less free RAM")
+    lt.add_argument("--ai-concurrency", type=int, default=0, help="fast-path AI calls at once (0 = settings)")
+    lt.add_argument("--new-dest-share", type=float, default=0.1,
+                    help="share of normal requests to a destination the wallet never paid before")
     lt.add_argument("--llm", choices=["mock", "live"], default="mock",
                     help="mock (default) or live: the real Vultr model from .env (costs money)")
     lt.add_argument("--out", default=str(REPO / "docs" / "results"))

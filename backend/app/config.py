@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     sandbox_mode: str = "fresh"  # fresh: new container per check | warm: pool + snapshot/revert
     sandbox_pool_size: int = 4  # warm: containers kept ready
     sandbox_max_uses: int = 50  # warm: checks per container, then it is replaced
+    sandbox_owner: str = ""  # extra label fail-closed.owner=<this> (load tests: removed on Ctrl+C / kill)
     sandbox_max_age_seconds: float = 600.0  # warm: age limit per container
     sandbox_queue_seconds: float = 10.0  # wait for a slot, then 503 "Guard busy" (fail closed)
 
