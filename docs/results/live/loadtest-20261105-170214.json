@@ -1,0 +1,252 @@
+{
+  "machine": {
+    "os": "Windows-11-10.0.26300-SP0",
+    "python": "3.14.7",
+    "cpus": 16,
+    "processor": "AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD",
+    "docker": "29.8.0",
+    "docker_os": "Docker Desktop",
+    "docker_cpus": 16,
+    "docker_mem_gib": 7.4
+  },
+  "seed": 7,
+  "results": [
+    {
+      "config": "warm/escalation-on",
+      "overrides": {
+        "sandbox_mode": "warm",
+        "fast_path_llm_escalation": true
+      },
+      "requests": 501,
+      "normal": 500,
+      "attacks": 1,
+      "attacks_stopped": 1,
+      "attack_result": {
+        "i": 202,
+        "attack": true,
+        "kind": "eip7702-attack",
+        "chain": 1,
+        "verdict": "BLOCK",
+        "new_dest": false,
+        "ai_asked": false,
+        "path": "slow",
+        "rules": [
+          "C1",
+          "R1",
+          "R2",
+          "R3"
+        ],
+        "signed": false,
+        "ms": 2693.5,
+        "escalated": false,
+        "ai_unavailable": null,
+        "detail": "[R2] Nonces 999, 1000, 1001. A wallet never needs more than one; many nonces at once is how an attacker makes sure one of them matches.; [C1] Customer withdrawals are plain transfers (native or a known token). 3 EIP-7702 authorization(s).; [R1] 0x1000000000000000000000000000000000000104 gets code 0xef010000000000000000000000000000000000005eeeee (was 0x): from now on it runs the code of 0x00000000000000000000000000000000005eeeee, which i; [R3] 0x1000000000000000000000000000000000000104 -> 0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc: 3,000 ETH of 3,000 ETH (100.0%). Evidence: probe: 0x3c44..93bc (address hard-coded in delegate code) call",
+        "timings_ms": {
+          "state": 0,
+          "request_rules": 0,
+          "sandbox": 2691,
+          "sandbox.pool_acquire": 227,
+          "sandbox.state_inject": 358,
+          "sandbox.tx": 568,
+          "sandbox.trace": 128,
+          "sandbox.probe": 1295,
+          "sandbox.revert": 114,
+          "sandbox.release": 0,
+          "decide": 0,
+          "total": 2692
+        }
+      },
+      "normal_not_allowed": 0,
+      "normal_not_allowed_by_verdict": {},
+      "normal_not_allowed_by_rule": {},
+      "normal_not_allowed_rows": [],
+      "normal_signed": 500,
+      "paths": {
+        "fast": 450,
+        "slow": 51
+      },
+      "escalated": 0,
+      "new_destinations": 50,
+      "ai_asked": 50,
+      "latency_ms": {
+        "fast": {
+          "n": 450,
+          "p50": 3.6,
+          "p95": 12.7,
+          "p99": 27.9,
+          "mean": 5.3
+        },
+        "slow": {
+          "n": 51,
+          "p50": 3011.0,
+          "p95": 4493.9,
+          "p99": 5291.3,
+          "mean": 3223.3
+        },
+        "early": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "mean": null
+        }
+      },
+      "total_seconds": 21.93,
+      "throughput_rps": 22.8,
+      "concurrency": 8,
+      "sandboxes_started": 4,
+      "sandbox_retries": 0,
+      "busy_503": 0,
+      "pool": {
+        "started": 4,
+        "reused": 51,
+        "dirty": 0,
+        "discarded": 0,
+        "retired": 0
+      },
+      "pool_warm_up_seconds": 3.84,
+      "ai_unavailable": 50,
+      "ai_unavailable_by_reason": {
+        "timeout 2 s": 15,
+        "busy, 3 AI checks already running": 35
+      },
+      "llm": {
+        "mode": "live",
+        "model": "glm-5.3-flash",
+        "reasoning_effort": "minimal",
+        "latency_ms": null,
+        "escalate_rate": null,
+        "calls": 73,
+        "ok": 66,
+        "failures": {
+          "timeout": 6,
+          "invalid answer": 1
+        },
+        "prompt_tokens": 92514,
+        "completion_tokens": 15385,
+        "cost_usd": 0.091612,
+        "calls_by_model": {
+          "glm-5.3-flash": 22,
+          "glm-5.3": 51
+        }
+      },
+      "sandbox_timeout_seconds": 30.0
+    },
+    {
+      "config": "warm/escalation-off",
+      "overrides": {
+        "sandbox_mode": "warm",
+        "fast_path_llm_escalation": false
+      },
+      "requests": 501,
+      "normal": 500,
+      "attacks": 1,
+      "attacks_stopped": 1,
+      "attack_result": {
+        "i": 202,
+        "attack": true,
+        "kind": "eip7702-attack",
+        "chain": 1,
+        "verdict": "BLOCK",
+        "new_dest": false,
+        "ai_asked": false,
+        "path": "slow",
+        "rules": [
+          "C1",
+          "R1",
+          "R2",
+          "R3"
+        ],
+        "signed": false,
+        "ms": 2551.4,
+        "escalated": false,
+        "ai_unavailable": null,
+        "detail": "[R2] Nonces 999, 1000, 1001. A wallet never needs more than one; many nonces at once is how an attacker makes sure one of them matches.; [C1] Customer withdrawals are plain transfers (native or a known token). 3 EIP-7702 authorization(s).; [R1] 0x1000000000000000000000000000000000000104 gets code 0xef010000000000000000000000000000000000005eeeee (was 0x): from now on it runs the code of 0x00000000000000000000000000000000005eeeee, which i; [R3] 0x1000000000000000000000000000000000000104 -> 0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc: 3,000 ETH of 3,000 ETH (100.0%). Evidence: probe: 0x3c44..93bc (address hard-coded in delegate code) call",
+        "timings_ms": {
+          "state": 0,
+          "request_rules": 16,
+          "sandbox": 2532,
+          "sandbox.pool_acquire": 260,
+          "sandbox.state_inject": 417,
+          "sandbox.tx": 527,
+          "sandbox.trace": 110,
+          "sandbox.probe": 1100,
+          "sandbox.revert": 117,
+          "sandbox.release": 0,
+          "decide": 0,
+          "total": 2549
+        }
+      },
+      "normal_not_allowed": 0,
+      "normal_not_allowed_by_verdict": {},
+      "normal_not_allowed_by_rule": {},
+      "normal_not_allowed_rows": [],
+      "normal_signed": 500,
+      "paths": {
+        "fast": 500,
+        "slow": 1
+      },
+      "escalated": 0,
+      "new_destinations": 50,
+      "ai_asked": 0,
+      "latency_ms": {
+        "fast": {
+          "n": 500,
+          "p50": 16.1,
+          "p95": 26.3,
+          "p99": 32.0,
+          "mean": 16.2
+        },
+        "slow": {
+          "n": 1,
+          "p50": 2551.4,
+          "p95": 2551.4,
+          "p99": 2551.4,
+          "mean": 2551.4
+        },
+        "early": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "mean": null
+        }
+      },
+      "total_seconds": 2.98,
+      "throughput_rps": 168.1,
+      "concurrency": 8,
+      "sandboxes_started": 4,
+      "sandbox_retries": 0,
+      "busy_503": 0,
+      "pool": {
+        "started": 4,
+        "reused": 1,
+        "dirty": 0,
+        "discarded": 0,
+        "retired": 0
+      },
+      "pool_warm_up_seconds": 3.66,
+      "ai_unavailable": 0,
+      "ai_unavailable_by_reason": {},
+      "llm": {
+        "mode": "live",
+        "model": "glm-5.3-flash",
+        "reasoning_effort": "minimal",
+        "latency_ms": null,
+        "escalate_rate": null,
+        "calls": 1,
+        "ok": 1,
+        "failures": {},
+        "prompt_tokens": 771,
+        "completion_tokens": 159,
+        "cost_usd": 0.001055,
+        "calls_by_model": {
+          "glm-5.3": 1
+        }
+      },
+      "sandbox_timeout_seconds": 30.0
+    }
+  ],
+  "created": "20261105-170214",
+  "note": "laptop, Docker Desktop, real Vultr model glm-5.3-flash; to be re-run on the Vultr VM"
+}
