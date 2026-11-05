@@ -278,6 +278,12 @@ class History:
             (authority, since, exclude or ""))
         return [(r["chain_id"], r["nonce"]) for r in rows]
 
+    def paid_before(self, wallet: str, destination: str, before: float, exclude: str | None = None) -> bool:
+        """True if this wallet already had an ALLOWed transfer to this destination (any chain)."""
+        rows = self._rows("SELECT 1 FROM checks WHERE wallet = ? AND destination = ? AND verdict = 'ALLOW'"
+                          " AND ts < ? AND id != ? LIMIT 1", (wallet, destination, before, exclude or ""))
+        return bool(rows)
+
     def checks_to(self, destination: str) -> list[dict[str, Any]]:
         """Value-moving checks to one destination, oldest first (for the blast radius)."""
         rows = self._rows("SELECT ts, chain_id, asset, amount, verdict FROM checks "

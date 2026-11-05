@@ -152,6 +152,7 @@ class LLMAssessment(BaseModel):
     explanation: str = Field(min_length=1)
     escalate: bool = Field(strict=True)
     mock: bool = False  # True = produced by the local mock, not by a model
+    model: str | None = None  # which model wrote it (set by the explainer, never parsed from the answer)
 
 
 class Verdict(BaseModel):

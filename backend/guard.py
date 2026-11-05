@@ -12,15 +12,20 @@ Routing:
                   no request/history finding at all.
     treasury:     the same shape, destination on the allowlist, amount under the limit,
                   no finding.
-    FAST_PATH_LLM_ESCALATION on: the LLM is asked; escalate=true -> slow path. If the AI check
-                  is unavailable (timeout, error, 429, invalid answer, not configured) it is
-                  never read as "no escalation": -> slow path (full simulation; more checking,
-                  never less, and never a BLOCK just for that). The LLM never sets a verdict.
+    FAST_PATH_LLM_ESCALATION on, and the escalation policy says so (a destination this wallet
+                  never paid before, or an amount above AI_CHECK_MIN_PCT of the wallet balance):
+                  the LLM is asked; escalate=true -> slow path. A known destination with a small
+                  amount is decided by the rules alone (the timeline says so). At most
+                  AI_CHECK_CONCURRENCY AI calls at once; no slot within the 2 s budget, or the AI
+                  check unavailable (timeout, error, 429, invalid answer, not configured) is never
+                  read as "no escalation": -> slow path (full simulation; more checking, never
+                  less, and never a BLOCK just for that). The LLM never sets a verdict.
 - slow: fresh sandbox, state diff, probe, simulation rules.
 Every check records why it took its path. Any unexpected error -> BLOCK (and recorded).
 """
 
 import logging
+import threading
 import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -34,6 +39,7 @@ from decode import Decoded, Kind, authority_of, decode
 from history import CheckRecord, History
 from llm import LLMUnavailable
 from policies.engine import RuleContext, block, decide, run_rules
+from policies.fmt import over_pct
 from policies.request_rules import REQUEST_RULES
 from policies.sim_rules import SIM_RULES
 from sandbox_gate import GuardBusy
@@ -80,11 +86,16 @@ class Guard:
         self.gate = gate  # SandboxGate: concurrency cap for sandboxes (None = no cap)
         # Explanations never hold up a verdict: slow/early-path explanations are made here, in the
         # background, then stored in history and sent as an SSE "explanation" event.
-        self._explain_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="explain")
+        self._explain_pool = ThreadPoolExecutor(max_workers=max(1, settings.llm_explain_concurrency),
+                                                thread_name_prefix="explain")
         # The fast-path escalation call has its OWN pool: it must never queue behind background
         # explanations (under load that queueing made calls hit the 2 s timeout and pushed most
         # traffic to the slow path, which made more explanations: a feedback loop).
         self._escalate_pool = ThreadPoolExecutor(max_workers=32, thread_name_prefix="escalate")
+        # At most AI_CHECK_CONCURRENCY fast-path AI calls in flight (a slot is held until the
+        # provider answers, even after our 2 s budget ran out): bursts above that are what the
+        # provider answers with 429.
+        self._ai_slots = threading.BoundedSemaphore(max(1, settings.ai_check_concurrency))
 
     def emit(self, check_id: str, kind: str, data: dict) -> None:
         if self.events is None:
@@ -165,7 +176,7 @@ class Guard:
         req_findings = self._timed(timings, "request_rules", run_rules, REQUEST_RULES, ctx)
 
         self.emit(check_id, "request_rules", {"findings": [_finding(f) for f in req_findings]})
-        path, reasons, llm = self._route(tx, decoded, req_findings, timings)
+        path, reasons, llm = self._route(tx, decoded, req_findings, timings, state, now, check_id)
         self.emit(check_id, "path", {"path": path.value, "reasons": reasons})
 
         sim: SimulationResult | None = None
@@ -215,7 +226,9 @@ class Guard:
         with self.gate.slot():  # GuardBusy if no slot in time
             return self.runner.run(tx, state)
 
-    def _route(self, tx: TxRequest, d: Decoded, findings, timings) -> tuple[Path, list[str], LLMAssessment | None]:
+    def _route(self, tx: TxRequest, d: Decoded, findings, timings, state: StartingState | None = None,
+               now: float | None = None, check_id: str | None = None,
+               ) -> tuple[Path, list[str], LLMAssessment | None]:
         s = self.settings
         ids = sorted({f.rule_id for f in findings})
         latched = sorted({f.rule_id for f in findings if f.rule_id in LATCHED and f.action is Decision.BLOCK})
@@ -242,19 +255,56 @@ class Guard:
         reasons = [f"known-safe shape ({shape}), no request/history findings"]
         if not s.fast_path_llm_escalation:
             return Path.FAST, reasons + ["LLM escalation off"], None
+        ask, why = self._ai_check_needed(tx, d, state, self.clock() if now is None else now, check_id)
+        if not ask:
+            return Path.FAST, reasons + [why], None
+        reasons.append(why)
         limit = s.fast_path_llm_timeout_seconds
-        t0 = self.perf()
-        future = self._escalate_pool.submit(self._escalation_check, tx)
+        t0 = time.monotonic()
+        if not self._ai_slots.acquire(timeout=limit):  # waited the whole budget for a free slot
+            timings["llm"] = time.monotonic() - t0
+            return Path.SLOW, reasons + [unavailable_reason(
+                f"busy, {s.ai_check_concurrency} AI checks already running")], None
+        future = self._escalate_pool.submit(self._escalation_check_in_slot, tx)
         try:
-            llm, failure = future.result(timeout=limit)
+            llm, failure = future.result(timeout=max(0.0, limit - (time.monotonic() - t0)))
         except FutureTimeout:
             llm, failure = None, f"timeout {limit:g} s"
-        timings["llm"] = self.perf() - t0
+        timings["llm"] = time.monotonic() - t0
         if llm is None:
             return Path.SLOW, reasons + [unavailable_reason(failure)], None
         if llm.escalate:
             return Path.SLOW, reasons + ["LLM asked for a deeper check"], llm
         return Path.FAST, reasons + ["LLM: no escalation" + (" (MOCK)" if llm.mock else "")], llm
+
+    def _ai_check_needed(self, tx: TxRequest, d: Decoded, state: StartingState | None, now: float,
+                         check_id: str | None) -> tuple[bool, str]:
+        """The escalation policy: ask the AI only for a new destination or a large amount.
+        It only chooses whether to ask; whatever the answer, the AI can only add checking."""
+        s = self.settings
+        pct = s.ai_check_min_pct
+        known = (tx.wallet_type is WalletType.TREASURY and d.destination in s.treasury_allowlist) \
+            or self.history.paid_before(tx.from_, d.destination, before=now, exclude=check_id)
+        acct = state.accounts.get(tx.from_) if state is not None else None
+        balance = None
+        if acct is not None:
+            balance = acct.balance if d.kind is Kind.NATIVE_TRANSFER else acct.token_balances.get(d.asset)
+        large = not balance or over_pct(d.amount, balance, pct)  # unknown balance counts as large
+        if known and not large:
+            return False, f"Known destination, small amount (at most {pct:g}% of the balance): AI check not needed"
+        amount = (f"amount above {pct:g}% of the wallet balance" if balance
+                  else "wallet balance unknown")
+        if not known and large:
+            return True, f"New destination for this wallet and {amount}: AI check asked"
+        if not known:
+            return True, "New destination for this wallet: AI check asked"
+        return True, f"Known destination, but {amount}: AI check asked"
+
+    def _escalation_check_in_slot(self, tx: TxRequest) -> tuple[LLMAssessment | None, str]:
+        try:
+            return self._escalation_check(tx)
+        finally:
+            self._ai_slots.release()
 
     def _escalation_check(self, tx: TxRequest) -> tuple[LLMAssessment | None, str]:
         """The fast-path AI check: the assessment, or None and why it is unavailable."""
@@ -282,7 +332,8 @@ class Guard:
             except Exception:  # noqa: BLE001
                 log.exception("could not store explanation for %s", check_id)
         self.emit(check_id, "explanation", {
-            "available": llm is not None, "ms": ms, "model": self.settings.vultr_model,
+            "available": llm is not None, "ms": ms,
+            "model": (llm.model if llm is not None and llm.model else self.settings.vultr_model),
             **({"intent_summary": llm.intent_summary, "risk_score": llm.risk_score,
                 "explanation": llm.explanation, "escalate": llm.escalate, "mock": llm.mock} if llm else
                {"reason": "LLM unavailable: no explanation; the verdict is the same"})})
@@ -290,7 +341,8 @@ class Guard:
 
     def _explain(self, tx: TxRequest, sim: SimulationResult | None) -> LLMAssessment | None:
         try:
-            return self.explainer.assess(tx, sim)
+            explain = getattr(self.explainer, "explain", None)  # the bigger model, then the fast one
+            return explain(tx, sim) if explain is not None else self.explainer.assess(tx, sim)
         except Exception as e:  # noqa: BLE001 - LLM failure never changes the verdict
             log.warning("explainer raised: %s", e)
             return None

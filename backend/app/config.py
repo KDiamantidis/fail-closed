@@ -33,7 +33,12 @@ class Settings(BaseSettings):
     # LLM (Vultr Serverless Inference). Explains only; never decides.
     vultr_inference_api_key: str = ""
     vultr_inference_base_url: str = "https://api.vultrinference.com/v1"
-    vultr_model: str = "glm-5.3-flash"
+    vultr_model: str = "glm-5.3-flash"  # fast-path AI check (2 s budget), and the explanation fallback
+    # Background explanation card only (never on the 2 s budget). Fails or times out -> vultr_model.
+    # "" = use vultr_model for explanations too.
+    vultr_explain_model: str = "glm-5.3"
+    llm_explain_timeout_seconds: float = 20.0
+    llm_explain_concurrency: int = 2  # background explanations at once
     llm_mode: str = "auto"  # auto | mock | live
     llm_timeout_seconds: float = 15.0
     llm_max_retries: int = 1
@@ -47,6 +52,10 @@ class Settings(BaseSettings):
     # Fast path (Phase 2): the LLM may only ask "escalate to slow path"; LLM error -> slow path.
     fast_path_llm_escalation: bool = True
     fast_path_llm_timeout_seconds: float = 2.0  # escalation call only; timeout -> slow path
+    # Escalation policy: the AI is asked on the fast path only for a destination this wallet never
+    # paid before, or an amount above this share of the wallet balance. Otherwise the rules alone.
+    ai_check_min_pct: float = 10.0
+    ai_check_concurrency: int = 3  # fast-path AI calls at once; no slot within the budget -> full simulation
 
     # Sandbox: fresh container per check, always destroyed.
     sandbox_image: str = "fail-closed-sandbox:foundry-v1.8.5"

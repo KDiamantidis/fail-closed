@@ -89,7 +89,9 @@ def test_unavailable_ai_check_goes_to_full_simulation(behaviour, kind, caplog):
     assert u["ok"] == 0 and set(u["failures"]) == {kind}
     assert g.explainer.client.calls == u["calls"]
     per_call = 1 if kind == "rate limited (429)" else 2  # no immediate retry after a 429
-    assert u["calls"] % per_call == 0 and u["calls"] >= per_call
+    fast = u["calls_by_model"].get("glm-5.3-flash", 0)  # the AI check, and the explanation fallback
+    assert fast % per_call == 0 and fast >= per_call
+    assert u["calls_by_model"].get("glm-5.3", 0) <= 1  # the explanation model: one try, no retry
     assert SECRET not in caplog.text and SECRET not in " ".join(r.verdict.path_reasons)
 
 

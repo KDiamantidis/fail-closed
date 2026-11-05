@@ -283,7 +283,12 @@ def create_app(services: Services | None = None) -> FastAPI:
                         "cpus": st.sandbox_cpus, "processes": st.sandbox_pids,
                         "timeout_seconds": st.sandbox_timeout_seconds, "max_concurrent": st.sandbox_max_concurrent},
             "ai": {"escalation_on_fast_path": st.fast_path_llm_escalation,
-                   "fast_path_timeout_seconds": st.fast_path_llm_timeout_seconds},
+                   "fast_path_timeout_seconds": st.fast_path_llm_timeout_seconds,
+                   "ask_above_pct": st.ai_check_min_pct, "max_concurrent": st.ai_check_concurrency,
+                   "policy": (f"Asked only for a destination this wallet never paid before, or an amount above "
+                              f"{st.ai_check_min_pct:g}% of the wallet balance. At most {st.ai_check_concurrency} "
+                              f"at a time; no answer within {st.fast_path_llm_timeout_seconds:g} s means full simulation."),
+                   "fast_model": st.vultr_model, "explain_model": st.vultr_explain_model or st.vultr_model},
         }
 
     @app.get("/guard/public-key")

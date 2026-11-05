@@ -85,6 +85,7 @@ class LLMUsage:
             self.completion_tokens = 0
             self.cost_usd = Fraction(0)
             self.priced = True
+            self.by_model: Counter[str] = Counter()  # calls per model (fast check vs explanation)
 
     def add(self, model: str, usage: Any) -> None:
         p = int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
@@ -98,9 +99,11 @@ class LLMUsage:
             else:
                 self.priced = False
 
-    def attempt(self, failure: str | None) -> None:
+    def attempt(self, failure: str | None, model: str | None = None) -> None:
         with self._lock:
             self.calls += 1
+            if model:
+                self.by_model[model] += 1
             if failure is None:
                 self.ok += 1
             else:
@@ -110,7 +113,8 @@ class LLMUsage:
         with self._lock:
             return {"calls": self.calls, "ok": self.ok, "failures": dict(self.failures),
                     "prompt_tokens": self.prompt_tokens, "completion_tokens": self.completion_tokens,
-                    "cost_usd": round(float(self.cost_usd), 6) if self.priced else None}
+                    "cost_usd": round(float(self.cost_usd), 6) if self.priced else None,
+                    "calls_by_model": dict(self.by_model)}
 
 SYSTEM_PROMPT = """You explain simulated EVM transactions for a wallet security guard.
 Deterministic rules have ALREADY made the decision; you only explain it for a human operator.
@@ -317,7 +321,20 @@ class LLMExplainer:
         except LLMUnavailable:
             return None  # never fall back to the mock when a key is set
 
-    def assess_or_raise(self, tx: TxRequest, sim: SimulationResult | None) -> LLMAssessment:
+    def explain(self, tx: TxRequest, sim: SimulationResult | None) -> LLMAssessment | None:
+        """The background explanation card: VULTR_EXPLAIN_MODEL (bigger, slower) with its own
+        timeout, then the fast model if that fails. Never on the 2 s fast-path budget."""
+        s = self.settings
+        big = s.vultr_explain_model.strip()
+        if self.mode == "live" and big and big != s.vultr_model:
+            try:
+                return self.assess_or_raise(tx, sim, model=big, timeout=s.llm_explain_timeout_seconds, retries=0)
+            except LLMUnavailable as e:
+                log.warning("explanation model failed (%s): falling back to the fast model", e.kind)
+        return self.assess(tx, sim)
+
+    def assess_or_raise(self, tx: TxRequest, sim: SimulationResult | None, model: str | None = None,
+                        timeout: float | None = None, retries: int | None = None) -> LLMAssessment:
         mode = self.mode
         if mode == "mock":
             if self.settings.mock_llm_latency_ms > 0:
@@ -334,24 +351,27 @@ class LLMExplainer:
             {"role": "user", "content": describe(tx, sim)},
         ]
         s = self.settings
-        kwargs: dict[str, Any] = {"model": s.vultr_model, "messages": messages, "temperature": 0,
+        model = model or s.vultr_model
+        kwargs: dict[str, Any] = {"model": model, "messages": messages, "temperature": 0,
                                   "max_tokens": s.llm_max_tokens}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
         if s.llm_json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         if s.llm_reasoning_effort:
             kwargs["extra_body"] = {"reasoning_effort": s.llm_reasoning_effort}
-        attempts = 1 + max(0, s.llm_max_retries)
+        attempts = 1 + max(0, s.llm_max_retries if retries is None else retries)
         kind = "error"
         for i in range(1, attempts + 1):
             try:
                 resp = self.client.chat.completions.create(**kwargs)
-                self.usage.add(s.vultr_model, getattr(resp, "usage", None))
+                self.usage.add(model, getattr(resp, "usage", None))
                 out = parse_assessment(resp.choices[0].message.content)
-                self.usage.attempt(None)
-                return out
+                self.usage.attempt(None, model)
+                return out.model_copy(update={"model": model})
             except Exception as e:  # noqa: BLE001 - every failure is handled the same way
                 kind = failure_kind(e)
-                self.usage.attempt(kind)
+                self.usage.attempt(kind, model)
                 # the kind and the exception class only: provider messages can echo request data
                 log.warning("LLM attempt %d/%d failed: %s (%s)", i, attempts, kind, type(e).__name__)
                 if kind == "rate limited (429)":
