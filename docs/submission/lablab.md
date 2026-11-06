@@ -13,7 +13,7 @@ An independent co-signer for crypto wallets: unusual withdrawals run in an isola
 
 (118 characters)
 
-## Long description (about 500 words with your "where it runs" line)
+## Long description (about 600 words with your "where it runs" line)
 
 **The problem.** In October and November 2026, two exchanges lost funds through signatures that
 were valid but should never have been made. At Binance, about $6.3 billion left hot wallets on
@@ -29,19 +29,24 @@ these incidents.
 signer. The signer signs only with a Guard approval bound to the exact request. The Guard checks
 what a signature will do, not who asks for it.
 
-**How it works.** Plain payouts to known customers are approved by fixed rules in milliseconds.
-Everything unusual (a new destination, EIP-7702, contract calls, large amounts) runs first in an
-isolated sandbox: Docker and Anvil, no network, read-only, 512 MB, 1 CPU, no secrets. The rules
-read the state diff and decide: allow, delay, needs review or block. Any error, timeout or empty
-result means block. A scoped circuit breaker stops as little as possible: one address, one wallet
-or one chain; everything only with two independent signals. The AI explains each decision in
-plain words and may ask for a deeper check. It never decides.
+**How it works.** Fixed rules check every request. A plain payout to a customer this wallet has
+paid before, of at most 10% of the balance, is approved by the rules alone, in milliseconds. Above
+10%, a quick AI check comes first (glm-5.3-flash, 2-second limit); if the AI wants a closer look,
+or does not answer in time, the request goes to the sandbox. Everything else goes to the sandbox
+first: a new destination, an EIP-7702 delegation, a contract call, or anything a rule flags (for
+example more than 25% of the balance). The sandbox is a local copy of the chain (Docker and
+Anvil): no network, read-only, 512 MB, 1 CPU, no secrets. The rules read what really changes and
+decide: allow, delay, needs review or block. Any error or timeout means block. A frozen address or
+a paused wallet is blocked at once. A scoped circuit breaker stops as little as possible: one
+address, wallet or chain; everything only with two independent signals. The AI explains each
+decision. It never decides.
 
 **What runs on Vultr.** Vultr Serverless Inference runs the AI: glm-5.3-flash for the fast check
 of large amounts, glm-5.3 for the explanation card. [WHERE: choose one line below.]
 
 **Measured results.** On a laptop (Windows 11, Docker Desktop, 6 Nov 2026), with 500 normal
-withdrawals and 1 hidden attack: the attack was stopped in all 4 setups and 0 of 500 normal
+withdrawals and 1 hidden attack: the attack was stopped in all 4 setups (a fresh sandbox per check
+or a warm pool of reused sandboxes, each with the AI check on and off) and 0 of 500 normal
 customers were refused. Fast path median 3 ms (warm setup); full sandbox check median 1.3 s (warm)
 or 2.4 s (fresh). A short run with the real Vultr models (49 + 1) stopped the attack with 0 refused
 and 0 rate limits. The red team ran hostile code inside the sandbox: 7 of 7 contained. In our model
@@ -66,12 +71,15 @@ on withdrawal wallets; rules for deposit-address sweeps.
 - **[LIMITS] if the VM worked:** All measured numbers above come from a laptop; the VM runs the live demo.
 - **[LIMITS] if Plan B:** The Vultr VM was blocked by account review, so the demo and all numbers are from a laptop.
 
-## Technologies
+## Technologies: pick ONE
 
-Python, FastAPI, Pydantic, Docker (rootless on the VM), Foundry Anvil (Prague hardfork), EIP-7702,
-SQLite, ed25519 approvals, React, Vite, Tailwind CSS, Server-Sent Events with polling fallback,
-Playwright, Caddy (VM) or Cloudflare Tunnel (Plan B), Vultr Serverless Inference (glm-5.3-flash,
-glm-5.3), Vultr Cloud Compute.
+- **If the VM worked:** Python, FastAPI, Pydantic, Docker (rootless), Foundry Anvil (Prague
+  hardfork), EIP-7702, SQLite, ed25519 approvals, React, Vite, Tailwind CSS, Server-Sent Events
+  with polling fallback, Playwright, Caddy, Vultr Serverless Inference (glm-5.3-flash, glm-5.3),
+  Vultr Cloud Compute.
+- **If Plan B:** Python, FastAPI, Pydantic, Docker Desktop, Foundry Anvil (Prague hardfork),
+  EIP-7702, SQLite, ed25519 approvals, React, Vite, Tailwind CSS, Server-Sent Events with polling
+  fallback, Playwright, Cloudflare Tunnel, Vultr Serverless Inference (glm-5.3-flash, glm-5.3).
 
 ## Tags
 

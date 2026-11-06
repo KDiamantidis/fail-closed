@@ -1,117 +1,156 @@
-# Video script (under 5 minutes)
+# Video script (target about 4:15)
 
-Read it aloud slowly. Short sentences. **[CLICK]** = what to do on screen. Before you record:
-press **Reset demo** on the Overview page, so the risk level is 0 (Normal).
+Read slowly. One sentence at a time. **[CLICK]** = what to do on screen. Words in [brackets]
+are how to say a hard word; do not read them. Times are speaking time at 110 words per minute;
+clicks and waiting add a little.
 
-Slides: `docs/slides/fail-closed-vm.pdf`, or `fail-closed-laptop.pdf` if the demo runs on the
-laptop (Plan B). The app: the demo address, or http://127.0.0.1:8000.
+Before you record: page **Overview** → **Reset demo** (the strip says "Normal"). Plan B: run
+`.\deploy\planb.ps1 redteam` once first, so the Containment page has its report.
+
+Slides: `docs/slides/fail-closed-vm.pdf`, or `fail-closed-laptop.pdf` for Plan B.
+Spoken lines only, for reading: `docs/submission/video-read.txt`.
 
 ---
 
-## 0:00 – 0:40 · The problem (slides 2 and 3)
+## 0:00 · The problem (slides 2 and 3)
 
 **[CLICK]** Show slide 2.
 
 > In 2026, two exchanges lost money through valid signatures.
-> At Binance, about 6.3 billion dollars left hot wallets.
-> One transaction carried fifty EIP-7702 authorizations. One of them handed a hot wallet to the
-> attacker's contract.
-> At Mercado Bitcoin, plain transfers sent funds to attacker addresses on at least ten chains.
+> At Binance [BY-nance], about 6.3 billion dollars left hot wallets.
+> One transaction carried fifty EIP-7702 [E-I-P seventy-seven oh two] authorizations.
+> One of them handed a hot wallet to the attacker's contract.
+> At Mercado Bitcoin [mer-KAH-doh], plain transfers sent funds to attacker addresses on at least ten chains.
 
 **[CLICK]** Show slide 3.
 
-> Then both exchanges paused withdrawals for all customers. Honest customers paid too.
-> Fail Closed is designed to reject this class of attack. We do not claim it would have stopped
-> these incidents.
+> Then both exchanges paused withdrawals for all customers.
+> Honest customers paid too.
+> Fail Closed is designed to reject this class of attack.
+> We do not claim it would have stopped these incidents.
 
-## 0:40 – 1:05 · The idea (slide 4)
+## 0:45 · The idea (slide 4)
 
 **[CLICK]** Show slide 4.
 
 > Our idea is simple: no approval, no signature.
-> Fail Closed is an independent co-signer. It checks what a signature will do, not who asks.
-> Fixed rules decide. The AI explains. It never decides.
+> Fail Closed is an independent co-signer.
+> It checks what a signature will do, not who asks.
+> Fixed rules decide.
+> The AI explains.
+> It never decides.
 
-## 1:05 – 1:35 · How it works (slide 5)
+## 1:03 · How it works (slide 5)
 
-**[CLICK]** Show slide 5. Point at each box from left to right.
+**[CLICK]** Show slide 5. Point at the boxes from left to right.
 
-> A withdrawal request comes in. Plain payouts to known customers pass the rules in milliseconds.
-> Anything unusual runs first in an isolated sandbox: no network, no secrets, fake funds.
+> A plain payout to a known customer passes the rules in milliseconds.
+> Anything unusual runs first in an isolated sandbox, with no network and no secrets.
 > The rule engine decides: allow, delay, needs review, or block.
-> Only an allow gets a signed approval. The signer signs only with that approval.
-> The AI runs on Vultr Serverless Inference. It explains, and it may ask for a deeper check.
+> Only an allow gets a signed approval, and the signer signs only with that approval.
+> The AI, glm-5.3 [G-L-M five point three], explains and may ask for a closer look.
 
-## 1:35 – 2:25 · Demo 1: delegation drain
+**Read ONE of these two lines:**
 
-**[CLICK]** Switch to the app, Overview page. Risk strip says "Normal".
-**[CLICK]** "Run replay" next to **Hot wallet delegation drain (EIP-7702)**.
+> **If the VM worked:** The Guard and the sandboxes run on a Vultr [vulture] Cloud Compute VM. The AI runs on Vultr Serverless Inference.
+>
+> **If Plan B (laptop):** Our Vultr [vulture] VM was blocked by account review, so today the Guard runs on my laptop. The AI still runs on Vultr Serverless Inference.
+
+
+## 1:50 · Demo 1: delegation drain
+
+**[CLICK]** Switch to the app, page **Overview**. The risk strip at the top says "Normal".
+**[CLICK]** Card **Incident replays** → **Run replay** next to **Hot wallet delegation drain (EIP-7702)**.
 
 > A compromised service asks the hot wallet to sign five delegation authorizations.
 
-**[CLICK]** "View requests", then the request row.
+**[CLICK]** Under the replay: **View requests →**, then click the one row in the table.
 
-> Blocked. The wallet would hand control to an unknown contract. Nothing was signed.
+> Blocked.
+> The wallet would hand control to an unknown contract.
+> Nothing was signed.
 
-**[CLICK]** Scroll to **Evidence from the sandbox**.
+**[CLICK]** Scroll to the card **Evidence from the sandbox**.
 
-> The sandbox shows the change: the wallet now runs the attacker's code. A test call moves
-> 100 ETH out, in the sandbox, with fake funds.
+> In the sandbox, a test call moves 100 ETH [eeth] out.
+> Fake funds, of course.
 
-**[CLICK]** Scroll to **AI analysis**.
+**[CLICK]** Scroll to the card **AI analysis**. WAIT until it shows text instead of "Analysis in progress" (by polling this can take 5-15 seconds; the header says "Updates every 2 s").
 
-> The AI explains in plain words. It did not decide. The risk strip at the top is now orange:
-> High, one wallet paused.
+> The AI explains in plain words.
+> It did not decide.
 
-## 2:25 – 3:15 · Demo 2: coordinated attack, risk 0 to 4
+**[CLICK]** Point at the strip at the top.
 
-**[CLICK]** Overview. **[CLICK]** "Reset demo". The strip says "Normal" again.
-**[CLICK]** "Run replay" next to **Coordinated attack on several wallets and chains**. Point at the
-risk strip while it changes colour.
+> The risk strip is now orange: High, one wallet paused.
 
-> Now several wallets and chains are attacked. Watch the risk level.
-> Level 1 freezes one address. Level 2 pauses one wallet. Level 3 puts one chain in safe mode.
+## 2:22 · Demo 2: coordinated attack, risk level 0 to 4
+
+**[CLICK]** Sidebar **Overview**. In the card **Incident replays**, click **Reset demo**. The strip says "Normal".
+**[CLICK]** **Run replay** next to **Coordinated attack on several wallets and chains**. Point at the strip while it changes colour (it may change in steps every 2 s).
+
+> Now several wallets and chains are attacked.
+> Watch the risk level.
+> Level one freezes one address.
+> Level two pauses one wallet.
+> Level three puts one chain in safe mode.
 > Customers outside the stopped scope keep being paid.
-> Level 4, the global stop, needs two independent signals.
+> Level four, the global stop, needs two independent signals.
 
-**[CLICK]** Show the deep red banner.
+**[CLICK]** Point at the deep red banner "Global stop: no withdrawals are being signed". Do NOT type the admin token on camera.
 
-> Only an operator can lift it, with the admin token. For visitors, Reset demo starts again.
+> Only an operator can lift it, with the admin token.
 
-**[CLICK]** "Reset demo".
+**[CLICK]** Click **Reset demo** (in the banner or in the card **Incident replays**).
 
-## 3:15 – 3:40 · Containment
 
-**[CLICK]** Sidebar: **Containment**.
+## 2:52 · Containment
 
-> We also attack the sandbox itself: network, secrets, writes, a fork bomb, a memory bomb, CPU
-> and privilege escalation. Seven of seven are contained.
+**[CLICK]** Sidebar **Containment** (page "Sandbox isolation report"; it shows the saved run).
 
-## 3:40 – 4:05 · Measured results (slide 9)
+> We also attack the sandbox itself.
+> It cannot reach the internet, find keys or secrets, change files, or gain privileges.
+> A fork bomb, a memory bomb and a CPU that spins forever are all stopped.
+> Seven of seven are contained.
+
+## 3:14 · Measured results and business value (slides 9 and 10)
 
 **[CLICK]** Show slide 9.
 
-> We measured five hundred normal withdrawals and one hidden attack on a laptop.
-> The attack was stopped. Zero normal customers were refused.
-> Plain payouts take about three milliseconds. A full sandbox check takes about one to three seconds.
+> We measured five hundred normal withdrawals and one hidden attack, on a laptop.
+> The attack was stopped.
+> No normal customer was refused.
+> Plain payouts take about three milliseconds.
+> A sandbox check takes one to three seconds.
 
-## 4:05 – 4:25 · Where it fits (slide 6)
+**[CLICK]** Show slide 10.
+
+> So normal customers keep being paid, and the breaker stops as little as possible.
+
+## 3:41 · Where it fits (slide 6)
 
 **[CLICK]** Show slide 6.
 
-> Screening products and signer hooks already exist. The hooks give the enforcement point.
-> Fail Closed is a prototype of the decision logic behind it.
+> Signer hooks already exist.
+> Fail Closed is a prototype of the decision logic behind them.
 
-## 4:25 – 4:50 · Honest limits and next (slide 11)
+## 3:50 · Honest limits and next (slide 11)
 
 **[CLICK]** Show slide 11.
 
-> This is a prototype on a test chain with fake funds. It does not stop the first break-in. It
-> stops that break-in from getting a signature.
-> Next: plug into a real signer hook, and check every signature against the exchange ledger.
+> This is a prototype on a test chain with fake funds.
+> It does not stop the first break-in.
+> It stops that break-in from getting a signature.
+> Next: a real signer hook, and checking every signature against the exchange ledger.
 
-## 4:50 – 5:00 · Close (slide 1)
+## 4:11 · Close (slide 1)
 
 **[CLICK]** Show slide 1.
 
-> Fail Closed. No approval, no signature. Thank you.
+> Fail Closed.
+> No approval, no signature.
+> Thank you.
+
+---
+
+Spoken words: 468 (counting the longer where-it-runs line). At 110 words per minute: 4:15 of speaking.

@@ -1,0 +1,87 @@
+0:00
+
+In 2026, two exchanges lost money through valid signatures.
+At Binance [BY-nance], about 6.3 billion dollars left hot wallets.
+One transaction carried fifty EIP-7702 [E-I-P seventy-seven oh two] authorizations.
+One of them handed a hot wallet to the attacker's contract.
+At Mercado Bitcoin [mer-KAH-doh], plain transfers sent funds to attacker addresses on at least ten chains.
+Then both exchanges paused withdrawals for all customers.
+Honest customers paid too.
+Fail Closed is designed to reject this class of attack.
+We do not claim it would have stopped these incidents.
+
+0:45
+
+Our idea is simple: no approval, no signature.
+Fail Closed is an independent co-signer.
+It checks what a signature will do, not who asks.
+Fixed rules decide.
+The AI explains.
+It never decides.
+
+1:03
+
+A plain payout to a known customer passes the rules in milliseconds.
+Anything unusual runs first in an isolated sandbox, with no network and no secrets.
+The rule engine decides: allow, delay, needs review, or block.
+Only an allow gets a signed approval, and the signer signs only with that approval.
+The AI, glm-5.3 [G-L-M five point three], explains and may ask for a closer look.
+[READ IF THE VM WORKED] The Guard and the sandboxes run on a Vultr [vulture] Cloud Compute VM. The AI runs on Vultr Serverless Inference.
+[READ IF PLAN B] Our Vultr [vulture] VM was blocked by account review, so today the Guard runs on my laptop. The AI still runs on Vultr Serverless Inference.
+
+1:50
+
+A compromised service asks the hot wallet to sign five delegation authorizations.
+Blocked.
+The wallet would hand control to an unknown contract.
+Nothing was signed.
+In the sandbox, a test call moves 100 ETH [eeth] out.
+Fake funds, of course.
+The AI explains in plain words.
+It did not decide.
+The risk strip is now orange: High, one wallet paused.
+
+2:22
+
+Now several wallets and chains are attacked.
+Watch the risk level.
+Level one freezes one address.
+Level two pauses one wallet.
+Level three puts one chain in safe mode.
+Customers outside the stopped scope keep being paid.
+Level four, the global stop, needs two independent signals.
+Only an operator can lift it, with the admin token.
+
+2:52
+
+We also attack the sandbox itself.
+It cannot reach the internet, find keys or secrets, change files, or gain privileges.
+A fork bomb, a memory bomb and a CPU that spins forever are all stopped.
+Seven of seven are contained.
+
+3:14
+
+We measured five hundred normal withdrawals and one hidden attack, on a laptop.
+The attack was stopped.
+No normal customer was refused.
+Plain payouts take about three milliseconds.
+A sandbox check takes one to three seconds.
+So normal customers keep being paid, and the breaker stops as little as possible.
+
+3:41
+
+Signer hooks already exist.
+Fail Closed is a prototype of the decision logic behind them.
+
+3:50
+
+This is a prototype on a test chain with fake funds.
+It does not stop the first break-in.
+It stops that break-in from getting a signature.
+Next: a real signer hook, and checking every signature against the exchange ledger.
+
+4:11
+
+Fail Closed.
+No approval, no signature.
+Thank you.
