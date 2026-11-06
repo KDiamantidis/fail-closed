@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fail Closed slides</title>
+<!-- 10 slides, 1920x1080 each. Exported to fail-closed.pdf by docs/slides/export.py.
+     Same colours and fonts as the web UI and docs/brand.
+     Rule: every number about the real incidents carries [VERIFY]; every measured number says
+     where and how it was measured. -->
+<style>
+  @font-face { font-family: "Inter"; font-weight: 400; src: url("../brand/fonts/inter-latin-400-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Inter"; font-weight: 500; src: url("../brand/fonts/inter-latin-500-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Inter"; font-weight: 600; src: url("../brand/fonts/inter-latin-600-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Inter"; font-weight: 700; src: url("../brand/fonts/inter-latin-700-normal.woff2") format("woff2"); }
+  :root {
+    --canvas: #f6f7f9; --surface: #ffffff; --border: #e4e7ec; --border-strong: #d0d5dd;
+    --ink: #101828; --body: #344054; --muted: #667085; --faint: #98a2b3;
+    --brand: #0f766e; --brand-tint: #ecfdf8;
+    --bad: #b42318; --bad-bg: #fef3f2; --bad-line: #fecdca;
+    --held: #93370d; --held-bg: #fffaeb; --held-line: #fedf89;
+  }
+  @page { size: 1920px 1080px; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--canvas); }
+  body { font-family: "Inter", system-ui, sans-serif; color: var(--body); font-feature-settings: "cv11", "ss01";
+         -webkit-font-smoothing: antialiased; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .slide { width: 1920px; height: 1080px; position: relative; overflow: hidden; background: var(--canvas);
+           padding: 96px 120px 0; page-break-after: always; break-after: page; }
+  .slide:last-child { page-break-after: auto; break-after: auto; }
+  .kicker { font-size: 26px; font-weight: 600; color: var(--brand); letter-spacing: 0.08em; text-transform: uppercase; }
+  h2 { margin-top: 18px; font-size: 68px; line-height: 1.08; font-weight: 700; color: var(--ink); letter-spacing: -0.025em; max-width: 1600px; }
+  .lead { margin-top: 26px; font-size: 36px; line-height: 1.4; color: var(--body); max-width: 1500px; }
+  ul.big { margin-top: 48px; list-style: none; display: grid; gap: 30px; max-width: 1560px; }
+  ul.big li { font-size: 38px; line-height: 1.35; color: var(--body); padding-left: 44px; position: relative; }
+  ul.big li::before { content: ""; position: absolute; left: 0; top: 18px; width: 16px; height: 16px; border-radius: 50%; background: var(--brand); }
+  b { color: var(--ink); font-weight: 600; }
+  .v { display: inline-block; margin-left: 6px; padding: 1px 9px; border-radius: 8px; font-size: 0.55em; font-weight: 700;
+       vertical-align: 0.35em; color: var(--held); background: var(--held-bg); border: 1px solid var(--held-line); letter-spacing: 0.03em; }
+  .foot { position: absolute; left: 120px; right: 120px; bottom: 56px; display: flex; justify-content: space-between;
+          align-items: flex-end; gap: 40px; font-size: 22px; color: var(--muted); }
+  .note { font-size: 24px; line-height: 1.45; color: var(--muted); max-width: 1500px; }
+  .claim { position: absolute; left: 120px; right: 120px; bottom: 112px; padding: 22px 28px; border-radius: 14px;
+           background: var(--surface); border: 1px solid var(--border); font-size: 27px; line-height: 1.4; color: var(--body); }
+  .num { position: absolute; right: 120px; bottom: 56px; font-size: 22px; color: var(--faint); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 36px 40px;
+          box-shadow: 0 1px 2px rgb(16 24 40 / 0.04); }
+  .shot { border-radius: 16px; overflow: hidden; border: 1px solid var(--border-strong); background: var(--surface);
+          box-shadow: 0 30px 60px -24px rgb(16 24 40 / 0.22); }
+  .shot .chrome { height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 16px; background: #fbfbfc;
+                  border-bottom: 1px solid var(--border); }
+  .shot .chrome i { width: 11px; height: 11px; border-radius: 50%; background: var(--border-strong); display: block; }
+  .shot img { display: block; width: 100%; }
+  .logo { width: 72px; height: 72px; }
+</style>
+</head>
+<body>
+
+<!-- 1. Title -->
+<section class="slide" style="display:flex;flex-direction:column;justify-content:center;padding-top:0">
+  <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#0f766e"/>
+    <path d="M12 5.5l5 2v4.2c0 3.1-2.1 5.4-5 6.3-2.9-.9-5-3.2-5-6.3V7.5l5-2z" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/>
+    <path d="M9.6 11.8l1.7 1.7 3.2-3.4" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  <h1 style="margin-top:44px;font-size:150px;line-height:1;font-weight:700;color:var(--ink);letter-spacing:-0.04em">Fail Closed</h1>
+  <p style="margin-top:30px;font-size:64px;font-weight:600;color:var(--brand);letter-spacing:-0.015em">No approval, no signature.</p>
+  <p class="lead" style="margin-top:36px;font-size:38px">An independent co-signer for crypto wallets. Unusual withdrawals run in an isolated sandbox before anything is signed.</p>
+  <p style="margin-top:56px;font-size:30px;font-weight:500;color:var(--muted)">Built on Vultr Serverless Inference + Cloud Compute</p>
+  <div class="foot"><span>Vultr Agent Rush · Challenge 1: Blast Radius Zero · November 2026</span><span>1</span></div>
+</section>
+
+<!-- 2. The problem -->
+<section class="slide">
+  <p class="kicker">The problem</p>
+  <h2>Two real attacks. The signer signed what it was asked.</h2>
+  <div style="margin-top:48px;display:grid;grid-template-columns:1fr 1fr;gap:40px">
+    <div class="card">
+      <p style="font-size:32px;font-weight:700;color:var(--ink)">Binance · 29 Oct 2026<span class="v">VERIFY</span></p>
+      <p style="margin-top:6px;font-size:26px;font-weight:600;color:var(--brand)">Hot wallet delegation drain (EIP-7702)</p>
+      <ul style="margin-top:22px;font-size:29px;line-height:1.42;padding-left:30px;display:grid;gap:12px">
+        <li>About $6.3 billion<span class="v">VERIFY</span> left hot wallets on about 10 chains<span class="v">VERIFY</span>.</li>
+        <li>One transaction carried 50 delegation authorizations<span class="v">VERIFY</span>: the wallet was handed to the attacker's contract.</li>
+        <li>No private key leaked<span class="v">VERIFY</span>. A compromised internal service asked, and the signer signed.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <p style="font-size:32px;font-weight:700;color:var(--ink)">Mercado Bitcoin · 2 Nov 2026<span class="v">VERIFY</span></p>
+      <p style="margin-top:6px;font-size:26px;font-weight:600;color:var(--brand)">Multi-chain drain after key theft</p>
+      <ul style="margin-top:22px;font-size:29px;line-height:1.42;padding-left:30px;display:grid;gap:12px">
+        <li>No delegation trick: plain signed transfers.</li>
+        <li>One address was paid on 10 chains<span class="v">VERIFY</span>, about 185 tokens<span class="v">VERIFY</span>, one by one.</li>
+        <li>Each transfer looked normal on its own.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="claim">Fail Closed is designed to reject this class of attack. We do not claim it would have stopped these incidents.</p>
+  <span class="num">2</span>
+</section>
+
+<!-- 3. The cost nobody counts -->
+<section class="slide">
+  <p class="kicker">The cost nobody counts</p>
+  <h2>After the attack, everyone waits.</h2>
+  <ul class="big">
+    <li>Both exchanges stopped withdrawals <b>for all customers</b><span class="v">VERIFY</span>, for days<span class="v">VERIFY</span>.</li>
+    <li>Honest customers pay for the attack too: their money is stuck.</li>
+    <li>A full stop is the only tool when nothing narrower exists.</li>
+    <li><b>A guard should stop the attacker, not the business.</b></li>
+  </ul>
+  <p class="claim">Fail Closed is designed to reject this class of attack. We do not claim it would have stopped these incidents.</p>
+  <span class="num">3</span>
+</section>
+
+<!-- 4. The idea -->
+<section class="slide">
+  <p class="kicker">The idea</p>
+  <h2>Check what a signature will <span style="color:var(--brand)">do</span>, not who asks.</h2>
+  <ul class="big">
+    <li><b>An independent co-signer.</b> The signer signs only with a Guard approval for that exact request.</li>
+    <li><b>Unusual requests run first</b> in an isolated sandbox: no network, no secrets, fake funds.</li>
+    <li><b>Fixed rules decide.</b> The AI explains in plain words. It may ask for a deeper check, never decides.</li>
+    <li><b>Fail closed.</b> Any error, timeout or empty result: no approval, no signature.</li>
+  </ul>
+  <span class="num">4</span>
+</section>
+
+<!-- 5. How it works -->
+<section class="slide" style="padding-top:64px">
+  <p class="kicker">How it works</p>
+  <img src="../brand/architecture.png" alt="Architecture: request, Guard, fast path or sandbox, rule engine, approval, signer"
+       style="display:block;margin:20px auto 0;width:1560px;border-radius:16px;border:1px solid var(--border)">
+  <span class="num">5</span>
+</section>
+
+<!-- 6. Demo 1 -->
+<section class="slide" style="padding-top:72px">
+  <p class="kicker">Demo 1 · Hot wallet delegation drain</p>
+  <h2 style="font-size:60px">Blocked. Nothing was signed.</h2>
+  <div style="margin-top:40px;display:grid;grid-template-columns:1040px 1fr;gap:56px;align-items:start">
+    <div class="shot"><div class="chrome"><i></i><i></i><i></i></div><img src="../brand/cover-ui.png" alt="The request detail: Blocked, nothing was signed"></div>
+    <ul class="big" style="margin-top:4px;gap:26px">
+      <li style="font-size:31px">The sandbox shows the wallet would be <b>handed to an unknown contract</b>.</li>
+      <li style="font-size:31px">A test call as the attacker <b>moves 100 ETH</b> out (fake funds, in the sandbox).</li>
+      <li style="font-size:31px">No approval, so <b>the signer refuses</b>. The wallet is paused.</li>
+    </ul>
+  </div>
+  <span class="num">6</span>
+</section>
+
+<!-- 7. Demo 2 -->
+<section class="slide" style="padding-top:72px">
+  <p class="kicker">Demo 2 · Coordinated attack</p>
+  <h2 style="font-size:60px">The risk level climbs 0 → 4, one narrow step at a time.</h2>
+  <div style="margin-top:36px;display:grid;grid-template-columns:1224px 1fr;gap:48px;align-items:start">
+    <div style="display:grid;gap:22px">
+      <!-- crops of the real screenshots (1440 px wide): the risk strip, the header and the Risk level card -->
+      <div><p style="font-size:24px;font-weight:600;color:var(--muted);margin-bottom:8px">Before: level 0, Normal</p>
+        <div class="shot" style="height:282px;background:#fff url('../screenshots/desktop-overview-level-0.png') no-repeat 0 0 / 1224px auto"
+             role="img" aria-label="Level 0 Normal"></div></div>
+      <div><p style="font-size:24px;font-weight:600;color:var(--muted);margin-bottom:8px">After the attack: level 4, Global stop</p>
+        <div class="shot" style="height:282px;background:#fff url('../screenshots/desktop-global-stop-level-4.png') no-repeat 0 0 / 1224px auto"
+             role="img" aria-label="Level 4 Global stop"></div></div>
+    </div>
+    <ul class="big" style="margin-top:44px;gap:24px">
+      <li style="font-size:29px">Level 1 freezes <b>one address</b>.</li>
+      <li style="font-size:29px">Level 2 pauses <b>one wallet</b>.</li>
+      <li style="font-size:29px">Level 3: <b>one chain</b> in safe mode.</li>
+      <li style="font-size:29px">Other customers keep being paid until level 4.</li>
+      <li style="font-size:29px">Level 4 needs <b>two independent signals</b>. Only an operator lifts it, with the admin token.</li>
+    </ul>
+  </div>
+  <span class="num">7</span>
+</section>
+
+<!-- 8. Measured results -->
+<section class="slide" style="padding-top:72px">
+  <p class="kicker">Measured results</p>
+  <h2 style="font-size:60px">500 normal withdrawals + 1 hidden attack</h2>
+  <div class="card" style="margin-top:36px;padding:10px 40px">
+    <table style="width:100%;border-collapse:collapse;font-size:30px">
+      <tbody>
+        <tr style="border-bottom:1px solid var(--border)"><td style="padding:20px 0;color:var(--muted)">Attack stopped</td><td style="font-weight:700;color:var(--ink)">yes, in all 4 setups</td></tr>
+        <tr style="border-bottom:1px solid var(--border)"><td style="padding:20px 0;color:var(--muted)">Normal customers refused</td><td style="font-weight:700;color:var(--ink)">0 of 500</td></tr>
+        <tr style="border-bottom:1px solid var(--border)"><td style="padding:20px 0;color:var(--muted)">Fast path (plain payout to a known customer)</td><td style="font-weight:700;color:var(--ink)">3 ms median</td></tr>
+        <tr style="border-bottom:1px solid var(--border)"><td style="padding:20px 0;color:var(--muted)">Slow path (full sandbox check)</td><td style="font-weight:700;color:var(--ink)">1.3 s median (warm) · 2.4 s (fresh)</td></tr>
+        <tr style="border-bottom:1px solid var(--border)"><td style="padding:20px 0;color:var(--muted)">Same check with the real Vultr model (49 + 1)</td><td style="font-weight:700;color:var(--ink)">attack stopped · 0 refused · 0 rate limits</td></tr>
+        <tr><td style="padding:20px 0;color:var(--muted)">Red team: hostile code inside the sandbox</td><td style="font-weight:700;color:var(--ink)">7 of 7 contained</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note" style="margin-top:26px">Measured on a laptop (Windows 11, 16 CPUs, Docker Desktop), 6 Nov 2026, with <span class="mono">backend/cli.py loadtest</span>:
+    mock AI (800 ms per call) for the 500 + 1; real Vultr <span>glm-5.3-flash</span> for the 49 + 1. Red team: the browser test run of 6 Nov 2026.
+    Not yet measured on the Vultr VM. Data: <span>docs/results/</span>.</p>
+  <span class="num">8</span>
+</section>
+
+<!-- 9. Business value -->
+<section class="slide">
+  <p class="kicker">Business value</p>
+  <h2>Protect the wallets without stopping normal customers.</h2>
+  <ul class="big">
+    <li>Everyday payouts to known customers are approved <b>in milliseconds</b>.</li>
+    <li>New destinations and unusual requests get a <b>full simulation</b> first, in about a second or two.</li>
+    <li>Large or odd payouts go to <b>a person</b>, not to a blanket stop.</li>
+    <li>The breaker stops <b>as little as possible</b>: address, then wallet, then chain.</li>
+    <li>In our load test: <b>0 of 500</b> normal customers refused (laptop, mock AI, 6 Nov 2026).</li>
+  </ul>
+  <span class="num">9</span>
+</section>
+
+<!-- 10. Honest limits + next -->
+<section class="slide">
+  <p class="kicker">Honest limits · What's next</p>
+  <div style="margin-top:28px;display:grid;grid-template-columns:1fr 1fr;gap:40px">
+    <div class="card">
+      <p style="font-size:38px;font-weight:700;color:var(--ink)">Honest limits</p>
+      <ul style="margin-top:22px;font-size:29px;line-height:1.42;padding-left:30px;display:grid;gap:14px">
+        <li>A hackathon prototype: local test chain, fake funds.</li>
+        <li>It does not stop the first break-in. It stops the break-in from getting a signature.</li>
+        <li>If an attacker takes over the Guard or its key, the protection is gone: run it separately.</li>
+        <li>Numbers so far come from a laptop, not yet from the VM.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <p style="font-size:38px;font-weight:700;color:var(--ink)">What's next</p>
+      <ul style="margin-top:22px;font-size:29px;line-height:1.42;padding-left:30px;display:grid;gap:14px">
+        <li>A real co-signer in MPC or multisig wallets, and in HSMs.</li>
+        <li>Non-EVM chains.</li>
+        <li>Simulation on a mainnet fork.</li>
+        <li>A watchtower that spots a hijacked wallet and stops its top-ups.</li>
+      </ul>
+    </div>
+  </div>
+  <p style="margin-top:44px;font-size:44px;font-weight:600;color:var(--brand)">No approval, no signature.</p>
+  <span class="num">10</span>
+</section>
+
+</body>
+</html>

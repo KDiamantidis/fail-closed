@@ -40,3 +40,4 @@ frontend/tsconfig.tsbuildinfo
 
 # brand previews (docs/brand/export.py)
 docs/brand/preview-*.png
+docs/slides/check/
