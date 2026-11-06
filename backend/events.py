@@ -14,7 +14,7 @@ from typing import Any
 
 
 class EventBus:
-    def __init__(self, keep: int = 1000, queue_size: int = 1000):
+    def __init__(self, keep: int = 5000, queue_size: int = 1000):  # keep: enough for polling clients
         self._subs: list[tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = []
         self._lock = threading.Lock()
         self._seq = itertools.count(1)

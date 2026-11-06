@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     rate_replays_per_minute: int = 10
     rate_simulations_per_10_minutes: int = 2
     rate_demo_actions_per_minute: int = 30
+    rate_polls_per_minute: int = 300  # GET /events polling (never counted as a replay or demo action)
+    # Live updates in the web UI: "sse" (Server-Sent Events first, polling only if the stream
+    # fails) or "poll" (always poll GET /events; e.g. behind a Cloudflare quick tunnel, which
+    # does not support SSE).
+    live_updates: str = "sse"
 
     # Sandbox: fresh container per check, always destroyed.
     sandbox_image: str = "fail-closed-sandbox:foundry-v1.8.5"

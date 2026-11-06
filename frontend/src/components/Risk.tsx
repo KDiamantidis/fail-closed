@@ -78,6 +78,18 @@ export function ResetDemoButton({ className = "btn btn-secondary", label = "Rese
   );
 }
 
+/** A calm note when updates come by polling, or are late. Nothing when Server-Sent Events work. */
+export function LiveNote() {
+  const { live } = useStore();
+  if (live !== "polling" && live !== "delayed") return null;
+  return (
+    <span data-testid="live-status" data-state={live} role="status"
+      className={`text-[12px] font-medium ${live === "delayed" ? "text-risk1" : "text-muted"}`}>
+      {live === "delayed" ? "Updates delayed, retrying…" : "Updates every 2 s"}
+    </span>
+  );
+}
+
 export function DemoNotice() {
   const { notice } = useStore();
   if (!notice) return null;

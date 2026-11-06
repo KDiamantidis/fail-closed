@@ -45,8 +45,7 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-@pytest.fixture(scope="module")
-def server():
+def run_server(extra: dict | None = None):
     port = free_port()
     tmp = Path(tempfile.mkdtemp(prefix="fc-ui-"))
     env = {**os.environ, "HISTORY_DB": str(tmp / "h.sqlite3"), "SIGNER_DB": str(tmp / "s.sqlite3"),
@@ -55,6 +54,7 @@ def server():
         env["LLM_MODE"] = "live"  # the key comes from .env inside the server process
     else:
         env.update({"LLM_MODE": "mock", "MOCK_LLM_LATENCY_MS": "300"})
+    env.update(extra or {})
     proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.api:app", "--host", "127.0.0.1",
                              "--port", str(port), "--log-level", "warning"],
                             cwd=REPO / "backend", env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -69,6 +69,21 @@ def server():
     else:
         proc.kill()
         pytest.fail("API did not start: " + proc.stderr.read().decode(errors="replace")[-2000:])
+    return base, proc
+
+
+@pytest.fixture(scope="module")
+def server():
+    base, proc = run_server()
+    yield base
+    proc.terminate()
+    proc.wait(timeout=10)
+
+
+@pytest.fixture(scope="module")
+def poll_server():
+    """Like Plan B behind a Cloudflare quick tunnel: public demo, updates by polling only."""
+    base, proc = run_server({"LIVE_UPDATES": "poll", "PUBLIC_DEMO": "true"})
     yield base
     proc.terminate()
     proc.wait(timeout=10)
@@ -354,4 +369,53 @@ def test_reduced_motion_has_no_colour_animation(server, browser):
     page.goto(server + "/#/overview")
     page.wait_for_selector('[data-testid="risk-strip"]')
     assert page.locator('[data-testid="risk-strip"]').evaluate("e => getComputedStyle(e).transitionDuration").startswith("0.2s")
+    page.close()
+
+
+def follow_without_sse(page, base: str) -> list[str]:
+    """Open the Overview and count the update requests (no /stream may be needed)."""
+    calls: list[str] = []
+    page.on("request", lambda r: calls.append(r.url.split(base, 1)[-1].split("?")[0]))
+    page.goto(base + "/#/overview")
+    page.wait_for_selector('[data-testid="replay-d_delegation_drain"]:not([disabled])')
+    return calls
+
+
+@pytest.mark.parametrize("viewport", ["desktop", "phone"])
+def test_forced_polling_shows_every_live_update(poll_server, browser, viewport):
+    """LIVE_UPDATES=poll (a tunnel without SSE): the risk level rises, the AI card arrives,
+    the global stop shows, Reset demo works; the page never opens /stream."""
+    page = browser.new_page(viewport=VIEWPORTS[viewport])
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    calls = follow_without_sse(page, poll_server)
+    replay(page, "d_delegation_drain")
+    assert page.locator('[data-testid="live-status"]').inner_text() in ("Updates every 2 s", "Updates delayed, retrying…")
+    open_first_request(page)
+    wait_for_explanation(page)  # the explanation card comes from polled events
+    assert_level(page, 2, "High: 1 wallet paused")
+    go(page, "/overview")
+    page.click('[data-testid="replay-g_coordinated_breaker"]')
+    page.wait_for_selector('[data-testid="global-stop-banner"]', timeout=120_000)
+    page.locator('[data-testid="replay-outcome-g_coordinated_breaker"]').wait_for(timeout=120_000)
+    assert_level(page, 4, "Global stop: no withdrawals are being signed")
+    page.click('[data-testid="reset-demo"]')
+    assert_level(page, 0, "Normal")
+    no_hscroll(page)
+    assert "/stream" not in calls and calls.count("/events") >= 3
+    assert errors == [], errors
+    page.close()
+
+
+def test_a_blocked_stream_falls_back_to_polling(server, browser):
+    """SSE first; when the stream does not get through, the page polls on its own."""
+    page = browser.new_page(viewport=VIEWPORTS["desktop"])
+    page.route("**/stream*", lambda route: route.abort())
+    calls = follow_without_sse(page, server)
+    replay(page, "d_delegation_drain")
+    page.wait_for_selector('[data-testid="live-status"]')
+    open_first_request(page)
+    wait_for_explanation(page)
+    assert_level(page, 2, "High")
+    assert "/stream" in calls and "/events" in calls  # tried the stream, then polled
     page.close()

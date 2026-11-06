@@ -325,6 +325,7 @@ def create_app(services: Services | None = None) -> FastAPI:
                 "fast_path_llm_escalation": svc.settings.fast_path_llm_escalation,
                 "delay_minutes": svc.settings.delay_minutes,
                 "public_demo": svc.settings.public_demo,
+                "live_updates": svc.settings.live_updates,
                 "demo_idle_reset_minutes": svc.settings.demo_idle_reset_minutes,
                 "llm_budget": getattr(svc.guard.explainer, "budget", None).snapshot()
                 if getattr(svc.guard.explainer, "budget", None) is not None else None}
@@ -478,14 +479,17 @@ def create_app(services: Services | None = None) -> FastAPI:
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     @app.post("/loadtest/run")
-    async def loadtest_run(request: Request, normal: int = Query(50, ge=10, le=100), seed: int = Query(7)):
+    async def loadtest_run(request: Request, normal: int = Query(50, ge=10, le=100), seed: int = Query(7),
+                           run_id: str | None = None):
         limit(request, "simulation", svc.settings.rate_simulations_per_10_minutes, 600, "simulations")
         """The small load demo for the UI: N normal + 1 hidden attack, on its OWN isolated state
         (in-memory history and breaker), through the host's sandbox gate. SSE: one event per
         request, then the summary. Mock LLM numbers are labelled as such."""
+        if run_id is not None and not RUN_ID.match(run_id):
+            raise HTTPException(status_code=422, detail="run_id: 8-32 lowercase letters or digits")
         if not svc.loadtest_lock.acquire(blocking=False):
             raise HTTPException(status_code=409, detail="a load demo is already running")
-        run_id = "loadtest-" + uuid.uuid4().hex[:8]
+        run_id = run_id or "loadtest-" + uuid.uuid4().hex[:8]  # client-chosen: it can poll /events?run_id
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
         cfg = {"sandbox_mode": svc.settings.sandbox_mode,
@@ -508,6 +512,8 @@ def create_app(services: Services | None = None) -> FastAPI:
             finally:
                 svc.loadtest_lock.release()
 
+        svc.bus.publish("-", "loadtest_started", {"run_id": run_id, "normal": normal, "attacks": 1, "config": cfg,
+                                                   "llm": "mock"}, run_id=run_id)
         threading.Thread(target=work, name=run_id, daemon=True).start()
 
         async def gen():
@@ -556,7 +562,9 @@ def create_app(services: Services | None = None) -> FastAPI:
         return {"reset": done, "breaker": st, "level": level_of(st)}
 
     @app.get("/events")
-    def events(after: int = 0, check_id: str | None = None, run_id: str | None = None) -> list[dict]:
+    def events(request: Request, after: int = 0, check_id: str | None = None, run_id: str | None = None) -> list[dict]:
+        """The same events as /stream, to poll when Server-Sent Events do not get through."""
+        limit(request, "poll", svc.settings.rate_polls_per_minute, 60, "update requests")
         return svc.bus.since(after, check_id, run_id)
 
     @app.get("/stream")

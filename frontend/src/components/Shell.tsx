@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { useStore, type Status } from "../lib/store";
-import { DemoNotice, GlobalStopBanner, RiskDot, RiskStrip } from "./Risk";
+import { DemoNotice, GlobalStopBanner, LiveNote, RiskDot, RiskStrip } from "./Risk";
 import { Pill } from "./ui";
 
 const ICONS: Record<string, ReactNode> = {
@@ -76,6 +76,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </span>
           </a>
           <div className="flex flex-wrap items-center justify-end gap-1.5" aria-label="System status">
+            <LiveNote />
             <Pill tone="brand" testid="env-badge">Environment: Demo</Pill>
             <span className="hidden flex-wrap gap-1.5 md:flex">
               <Pill testid="pill-sandbox">Sandbox: {status ? (status.sandbox_mode === "warm" ? "Warm pool" : "Fresh") : "…"}</Pill>

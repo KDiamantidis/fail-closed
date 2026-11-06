@@ -37,22 +37,71 @@ export function newRunId(): string {
 
 const EVENT_TYPES = ["run_started", "received", "decoded", "request_rules", "path", "sandbox_started",
   "sandbox_done", "findings", "verdict", "approval", "signer", "explanation", "human_action",
-  "human_decision", "hold_blocked", "run_finished", "breaker_state"];
+  "human_decision", "hold_blocked", "run_finished", "breaker_state", "loadtest_started",
+  "loadtest_request", "loadtest_finished"];
 
-/** Subscribe to one demo run's events. Resolves once the stream is open. */
-export function subscribeRun(runId: string, onEvent: (e: GuardEvent) => void): Promise<() => void> {
+/** How live updates arrive: "live" (Server-Sent Events), "polling" (GET /events every
+ * POLL_MS), "delayed" (polling failed or was rate-limited; retrying with back-off). */
+export type LiveState = "live" | "polling" | "delayed";
+export const POLL_MS = 2000;
+
+/** Subscribe to one run's events. Server-Sent Events first; if the stream errors or brings no
+ * event within a few seconds (e.g. a tunnel that does not pass SSE), or `forcePoll` is set, it
+ * polls GET /events instead. Events are delivered once each (by seq). Resolves when ready. */
+export function subscribeRun(runId: string, onEvent: (e: GuardEvent) => void,
+                             opts: { forcePoll?: boolean; onState?: (s: LiveState) => void } = {}): Promise<() => void> {
   return new Promise((resolve) => {
-    const es = new EventSource(`/stream?run_id=${encodeURIComponent(runId)}`);
-    const close = () => es.close();
+    let closed = false, gotEvent = false, failures = 0, lastSeq = 0;
+    let es: EventSource | null = null;
+    let timer: number | undefined;
+    const seen = new Set<number>();
+    const deliver = (e: GuardEvent) => {
+      if (closed || seen.has(e.seq)) return;
+      seen.add(e.seq);
+      lastSeq = Math.max(lastSeq, e.seq);
+      gotEvent = true;
+      onEvent(e);
+    };
+    const poll = async () => {
+      if (closed) return;
+      try {
+        const evs = await getJSON<GuardEvent[]>(`/events?after=${lastSeq}&run_id=${encodeURIComponent(runId)}`);
+        failures = 0;
+        opts.onState?.("polling");
+        for (const e of evs) deliver(e);
+      } catch {
+        failures += 1;
+        opts.onState?.(failures >= 2 ? "delayed" : "polling");
+      }
+      if (!closed) timer = window.setTimeout(poll, failures ? Math.min(15000, POLL_MS * 2 ** failures) : POLL_MS);
+    };
+    const startPolling = () => {
+      if (es) { es.close(); es = null; }
+      if (timer === undefined && !closed) { opts.onState?.("polling"); timer = window.setTimeout(poll, 0); }
+    };
+    const close = () => {
+      closed = true;
+      es?.close();
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+    if (opts.forcePoll || typeof EventSource === "undefined") {
+      startPolling();
+      resolve(close);
+      return;
+    }
+    es = new EventSource(`/stream?run_id=${encodeURIComponent(runId)}`);
     for (const t of EVENT_TYPES) {
       es.addEventListener(t, (m) => {
-        try { onEvent(JSON.parse((m as MessageEvent).data)); } catch { /* ignore a malformed event */ }
+        try { deliver(JSON.parse((m as MessageEvent).data)); } catch { /* ignore a malformed event */ }
       });
     }
+    es.onerror = () => startPolling();  // a broken or blocked stream: poll instead, nothing is lost (seq)
     let done = false;
     const ready = () => { if (!done) { done = true; resolve(close); } };
-    es.addEventListener("open", ready);
-    setTimeout(ready, 1500); // never block the run on the stream
+    es.addEventListener("open", () => { opts.onState?.("live"); ready(); });
+    window.setTimeout(ready, 1500);  // never block the run on the stream
+    // the run publishes "run_started" at once: no event at all after 4 s means the stream is not getting through
+    window.setTimeout(() => { if (!gotEvent && !closed) startPolling(); }, 4000);
   });
 }
 

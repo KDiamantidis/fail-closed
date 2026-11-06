@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { getJSON, newRunId, postJSON, postStream, subscribeRun, type GuardEvent, type Verdict } from "./api";
+import { getJSON, newRunId, postJSON, postStream, subscribeRun, type GuardEvent, type LiveState, type Verdict } from "./api";
 import { levelOf, type RiskLevel } from "./risk";
 
 export interface ScenarioInfo {
@@ -50,6 +50,8 @@ export interface Status {
   redteam_public: boolean;
   delay_minutes: number;
   public_demo?: boolean;
+  live_updates?: "sse" | "poll";
+  deploy_target?: "vm" | "laptop";
   demo_idle_reset_minutes?: number;
   llm_budget?: { limit_usd: number; spent_today_usd: number; reached: boolean } | null;
 }
@@ -68,6 +70,7 @@ interface Store {
   risk: Risk;
   liftBreaker: (adminToken: string) => Promise<string | null>;  // null = done, else the error
   resetDemo: (why?: "button" | "idle") => Promise<void>;
+  live: LiveState | null;  // how updates arrive while a run is followed (null: nothing followed)
   notice: string | null;
   scenarios: ScenarioInfo[];
   runs: Run[];
@@ -111,6 +114,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const closers = useRef<(() => void)[]>([]);
   const lastActivity = useRef(Date.now());
   const [notice, setNotice] = useState<string | null>(null);
+  const [live, setLive] = useState<LiveState | null>(null);
+  const following = useRef(0);
+  const follow = (runId: string, onEvent: (e: GuardEvent) => void) => {
+    following.current += 1;
+    return subscribeRun(runId, onEvent, { forcePoll: status?.live_updates === "poll", onState: setLive })
+      .then((close) => () => {
+        close();
+        following.current -= 1;
+        if (following.current <= 0) { following.current = 0; setLive(null); }
+      });
+  };
   const touch = () => { lastActivity.current = Date.now(); setNotice(null); };
 
   useEffect(() => {
@@ -136,7 +150,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const runId = newRunId();
     const run: Run = { runId, scenario: sc, startedAt: Date.now(), status: "running", events: [] };
     setRuns((rs) => [run, ...rs].slice(0, 12));
-    const close = await subscribeRun(runId, (ev) => patch(runId, (r) => ({ ...r, events: [...r.events, ev] })));
+    const close = await follow(runId, (ev) => patch(runId, (r) => ({ ...r, events: [...r.events, ev] })));
     closers.current.push(close);
     try {
       const result = await postJSON(`/scenarios/${encodeURIComponent(name)}/run?run_id=${runId}`);
@@ -148,22 +162,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       patch(runId, (r) => ({ ...r, status: "error", error: String(e.message ?? e) }));
       return null;
     }
-  }, [scenarios, patch]);
+  }, [scenarios, patch, status]);
 
   const runSim = useCallback(async () => {
     touch();
     setSim({ status: "running", rows: [] });
+    // Rows come from the POST's own stream and, when that is buffered (a tunnel without SSE),
+    // from polling /events for the same run id. Each row once (by its index).
+    const runId = newRunId();
+    const seenRows = new Set<number>();
+    const onData = (type: string, data: any) => {
+      if (type === "loadtest_request" && !seenRows.has(data.i)) {
+        seenRows.add(data.i);
+        setSim((s) => ({ ...s, rows: [...s.rows, data] }));
+      }
+      if (type === "loadtest_finished") setSim((s) => ({ ...s, summary: data }));
+      if (type === "loadtest_error") setSim((s) => ({ ...s, error: data.error }));
+    };
+    const stop = await follow(runId, (ev) => onData(ev.type, ev.data));
     try {
-      await postStream("/loadtest/run?normal=50", (type, data) => {
-        if (type === "loadtest_request") setSim((s) => ({ ...s, rows: [...s.rows, data] }));
-        if (type === "loadtest_finished") setSim((s) => ({ ...s, summary: data }));
-        if (type === "loadtest_error") setSim((s) => ({ ...s, error: data.error }));
-      });
+      await postStream(`/loadtest/run?normal=50&run_id=${runId}`, onData);
       setSim((s) => ({ ...s, status: s.error ? "error" : "done" }));
     } catch (e: any) {
       setSim((s) => ({ ...s, status: "error", error: String(e.message ?? e) }));
+    } finally {
+      window.setTimeout(stop, 3000);
     }
-  }, []);
+  }, [status]);
 
   const decide = useCallback(async (runId: string, holdId: string, decision: "approve" | "reject") => {
     touch();
@@ -241,9 +266,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(t);
   }, [status, runs.length, running, resetDemo]);
 
-  const value = useMemo<Store>(() => ({ status, risk, liftBreaker, resetDemo, notice, scenarios, runs, rows, sim,
+  const value = useMemo<Store>(() => ({ status, risk, liftBreaker, resetDemo, notice, live, scenarios, runs, rows, sim,
     running, runReplay, runSim, decide, route, go }),
-    [status, risk, liftBreaker, resetDemo, notice, scenarios, runs, rows, sim, running, runReplay, runSim, decide,
+    [status, risk, liftBreaker, resetDemo, notice, live, scenarios, runs, rows, sim, running, runReplay, runSim, decide,
       route, go]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
