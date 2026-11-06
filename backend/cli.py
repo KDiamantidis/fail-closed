@@ -463,7 +463,7 @@ def cmd_loadtest(args) -> int:
     owner = safety.owner_for()
     base = Settings(**{**get_settings().model_dump(), "mock_llm_latency_ms": args.latency_ms,
                        "mock_llm_escalate_rate": args.escalate_rate, "sandbox_owner": owner,
-                       **({"ai_check_concurrency": args.ai_concurrency} if args.ai_concurrency else {})})
+                       **({"llm_concurrency": args.ai_concurrency} if args.ai_concurrency else {})})
     configs = list(CONFIGS) if args.configs == "all" else args.configs.split(",")
     live = args.llm == "live"
     if live and not base.vultr_inference_api_key:
@@ -479,7 +479,7 @@ def cmd_loadtest(args) -> int:
         print(f"note: could not check for leftover containers ({type(e).__name__})")
     if client_factory is not None:
         safety.Cleanup(owner, client_factory).install()
-    llm = (f"REAL LLM {base.vultr_model}, AI concurrency {base.ai_check_concurrency}" if live
+    llm = (f"REAL LLM {base.vultr_model}, AI concurrency {base.llm_concurrency}" if live
            else f"MOCK LLM {args.latency_ms} ms, escalates {args.escalate_rate:.0%}")
     print(f"Fail Closed | load test {args.normal} normal + 1 attack | configs: {', '.join(configs)} | {llm}")
     print(f"free RAM {free_txt}; containers labelled fail-closed.owner={owner}"
@@ -562,7 +562,7 @@ def main(argv: list[str] | None = None) -> int:
     lt.add_argument("--latency-ms", type=int, default=800, help="mock LLM latency per call")
     lt.add_argument("--escalate-rate", type=float, default=0.05, help="share of plain transfers the mock escalates")
     lt.add_argument("--min-free-gb", type=float, default=2.0, help="refuse to start with less free RAM")
-    lt.add_argument("--ai-concurrency", type=int, default=0, help="fast-path AI calls at once (0 = settings)")
+    lt.add_argument("--ai-concurrency", type=int, default=0, help="AI calls at once, checks and explanations together (0 = settings)")
     lt.add_argument("--new-dest-share", type=float, default=0.1,
                     help="share of normal requests to a destination the wallet never paid before")
     lt.add_argument("--llm", choices=["mock", "live"], default="mock",

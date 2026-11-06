@@ -147,6 +147,15 @@ class History:
 
     # ---- writes ----------------------------------------------------------------
 
+    def seed_payout(self, wallet: str, destination: str, chain_id: int, ts: float, id: str,  # noqa: A002
+                    why: str = "earlier payout (history seed)") -> None:
+        """An earlier ALLOWed small payout: makes `destination` a known destination for `wallet`
+        (load tests and test fixtures; production history fills this from real checks)."""
+        self.record_check(CheckRecord(
+            id=id, ts=ts, wallet=wallet, chain_id=chain_id, wallet_type="customer_hot", kind="native_transfer",
+            destination=destination, asset="native", amount=10**16, path="fast", path_reasons=[why],
+            verdict="ALLOW", findings=[], timings={}, llm=None, request={}))
+
     def record_check(self, r: CheckRecord) -> None:
         with self.lock, self.conn:
             self.conn.execute(

@@ -328,7 +328,7 @@
       "label": "normal customer withdrawal on chain 137 after the reset",
       "expect": {
         "verdict": "ALLOW",
-        "path": "fast"
+        "path": "slow"
       },
       "request": {
         "wallet_type": "customer_hot",

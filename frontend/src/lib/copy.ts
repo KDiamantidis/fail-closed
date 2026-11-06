@@ -65,7 +65,6 @@ export function rank(f: any): number {
   return i >= 0 ? i : j >= 0 ? j : 99;
 }
 
-/** Why the Guard chose this kind of check, in plain words. */
 /** Why the AI was or was not asked on the fast path (the escalation policy), in plain words. */
 export function aiAskedWhy(reasons: string[] = []): string | undefined {
   const r = reasons.find((x) => x.endsWith(": AI check asked") || x.endsWith(": AI check not needed"));
@@ -75,6 +74,8 @@ export function aiAskedWhy(reasons: string[] = []): string | undefined {
 export function pathWords(path: string, reasons: string[] = []): string {
   const why = aiAskedWhy(reasons);
   const asked = why ? ` (${why.charAt(0).toLowerCase() + why.slice(1)})` : "";
+  if (reasons.includes("New destination: full simulation"))
+    return "A plain transfer to a destination this wallet has never paid before, so it was run in full simulation first. The AI was not asked first; it explains the result afterwards.";
   if (reasons.some((r) => r.startsWith("AI check unavailable")))
     return `A plain transfer${asked}, but the AI check was unavailable, so it was run in full simulation instead of being approved instantly.`;
   if (reasons.includes("LLM asked for a deeper check"))
@@ -97,6 +98,8 @@ export function aiCheckStep(path: string, reasons: string[] = []): { note: strin
   }
   if (reasons.some((r) => r.endsWith("AI check not needed")))
     return { note: "not needed: known destination, small amount", ran: false, warn: false };
+  if (reasons.includes("New destination: full simulation"))
+    return { note: "not asked: new destination, full simulation", ran: false, warn: false };
   if (reasons.includes("LLM asked for a deeper check")) return { note: "asked for full simulation", ran: true, warn: true };
   if (reasons.some((r) => r.startsWith("LLM: no escalation"))) return { note: "no concerns", ran: true, warn: false };
   if (reasons.includes("LLM escalation off")) return { note: "off", ran: false, warn: false };

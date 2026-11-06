@@ -6,7 +6,7 @@ import time
 import pytest
 
 from sandbox_gate import GuardBusy, SandboxGate
-from tests.api_helpers import SCENARIOS, FakeRunner, client, scenario_request
+from tests.api_helpers import SCENARIOS, FakeRunner, client, known, scenario_request
 
 pytestmark = pytest.mark.skipif(not SCENARIOS.exists(), reason="scenarios/ not available")
 HOT_D = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"
@@ -37,7 +37,7 @@ def test_mercado_twice_gives_identical_results(tmp_path):
     a = c.post("/scenarios/e_mercado_multichain/run").json()
     b = c.post("/scenarios/e_mercado_multichain/run").json()
     assert summary(a) == summary(b)
-    assert summary(a)[20] == ("ALLOW", "fast", True)
+    assert summary(a)[20] == ("ALLOW", "slow", True)  # another customer, new destination: simulated
 
 
 def test_events_carry_the_run_id(tmp_path):
@@ -98,6 +98,6 @@ def test_fast_path_needs_no_slot(tmp_path):
     t.start()
     while svc.guard.gate.active == 0:
         time.sleep(0.01)
-    r = c.post("/withdraw", json=scenario_request("a_customer_small_withdrawal"))
+    r = c.post("/withdraw", json=known(svc, scenario_request("a_customer_small_withdrawal")))
     assert r.status_code == 200 and r.json()["signer"]["signed"] is True
     t.join()

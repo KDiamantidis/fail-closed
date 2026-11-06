@@ -12,20 +12,21 @@ Routing:
                   no request/history finding at all.
     treasury:     the same shape, destination on the allowlist, amount under the limit,
                   no finding.
-    FAST_PATH_LLM_ESCALATION on, and the escalation policy says so (a destination this wallet
-                  never paid before, or an amount above AI_CHECK_MIN_PCT of the wallet balance):
-                  the LLM is asked; escalate=true -> slow path. A known destination with a small
-                  amount is decided by the rules alone (the timeline says so). At most
-                  AI_CHECK_CONCURRENCY AI calls at once; no slot within the 2 s budget, or the AI
-                  check unavailable (timeout, error, 429, invalid answer, not configured) is never
-                  read as "no escalation": -> slow path (full simulation; more checking, never
-                  less, and never a BLOCK just for that). The LLM never sets a verdict.
+    FAST_PATH_LLM_ESCALATION on: the escalation policy.
+      - a destination this wallet never paid before -> slow path at once ("New destination:
+        full simulation"); the AI is not asked first (it still writes the explanation after).
+      - a known destination, amount above AI_CHECK_MIN_PCT of the wallet balance (or balance
+        unknown): the AI is asked; escalate=true -> slow path.
+      - a known destination, small amount: the rules alone (the timeline says so).
+      All model calls share LLM_CONCURRENCY slots; fast-path checks go before explanations.
+      No slot within the 2 s budget, or the AI check unavailable (timeout, error, 429, invalid
+      answer, not configured) is never read as "no escalation": -> slow path (full simulation;
+      more checking, never less, and never a BLOCK just for that). The LLM never sets a verdict.
 - slow: fresh sandbox, state diff, probe, simulation rules.
 Every check records why it took its path. Any unexpected error -> BLOCK (and recorded).
 """
 
 import logging
-import threading
 import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -37,7 +38,7 @@ from app.config import Settings
 from app.models import Decision, LLMAssessment, Path, SimulationResult, TxRequest, Verdict, WalletType
 from decode import Decoded, Kind, authority_of, decode
 from history import CheckRecord, History
-from llm import LLMUnavailable
+from llm import CallSlots, LLMUnavailable
 from policies.engine import RuleContext, block, decide, run_rules
 from policies.fmt import over_pct
 from policies.request_rules import REQUEST_RULES
@@ -85,17 +86,19 @@ class Guard:
         self.events = events  # callable(check_id, type, data) for the live stream; never raises out
         self.gate = gate  # SandboxGate: concurrency cap for sandboxes (None = no cap)
         # Explanations never hold up a verdict: slow/early-path explanations are made here, in the
-        # background, then stored in history and sent as an SSE "explanation" event.
-        self._explain_pool = ThreadPoolExecutor(max_workers=max(1, settings.llm_explain_concurrency),
+        # background, then stored in history and sent as an SSE "explanation" event. They wait in
+        # line for the shared model-call slots (fast-path checks go first).
+        self._explain_pool = ThreadPoolExecutor(max_workers=max(1, settings.llm_concurrency),
                                                 thread_name_prefix="explain")
         # The fast-path escalation call has its OWN pool: it must never queue behind background
         # explanations (under load that queueing made calls hit the 2 s timeout and pushed most
         # traffic to the slow path, which made more explanations: a feedback loop).
         self._escalate_pool = ThreadPoolExecutor(max_workers=32, thread_name_prefix="escalate")
-        # At most AI_CHECK_CONCURRENCY fast-path AI calls in flight (a slot is held until the
-        # provider answers, even after our 2 s budget ran out): bursts above that are what the
-        # provider answers with 429.
-        self._ai_slots = threading.BoundedSemaphore(max(1, settings.ai_check_concurrency))
+        # At most LLM_CONCURRENCY model calls in flight, fast-path checks and explanations together
+        # (a slot is held until the provider answers, even after our 2 s budget ran out): bursts
+        # above that are what the provider answers with 429. The explainer owns the slots.
+        slots = getattr(explainer, "slots", None)
+        self._ai_slots = slots if isinstance(slots, CallSlots) else CallSlots(settings.llm_concurrency)
 
     def emit(self, check_id: str, kind: str, data: dict) -> None:
         if self.events is None:
@@ -255,16 +258,18 @@ class Guard:
         reasons = [f"known-safe shape ({shape}), no request/history findings"]
         if not s.fast_path_llm_escalation:
             return Path.FAST, reasons + ["LLM escalation off"], None
-        ask, why = self._ai_check_needed(tx, d, state, self.clock() if now is None else now, check_id)
-        if not ask:
+        action, why = self._ai_check_needed(tx, d, state, self.clock() if now is None else now, check_id)
+        if action == "rules":
             return Path.FAST, reasons + [why], None
+        if action == "simulate":
+            return Path.SLOW, reasons + [why], None
         reasons.append(why)
         limit = s.fast_path_llm_timeout_seconds
         t0 = time.monotonic()
-        if not self._ai_slots.acquire(timeout=limit):  # waited the whole budget for a free slot
+        if not self._ai_slots.acquire(fast=True, timeout=limit):  # waited the whole budget for a free slot
             timings["llm"] = time.monotonic() - t0
             return Path.SLOW, reasons + [unavailable_reason(
-                f"busy, {s.ai_check_concurrency} AI checks already running")], None
+                f"busy, {s.llm_concurrency} AI calls already running")], None
         future = self._escalate_pool.submit(self._escalation_check_in_slot, tx)
         try:
             llm, failure = future.result(timeout=max(0.0, limit - (time.monotonic() - t0)))
@@ -278,27 +283,24 @@ class Guard:
         return Path.FAST, reasons + ["LLM: no escalation" + (" (MOCK)" if llm.mock else "")], llm
 
     def _ai_check_needed(self, tx: TxRequest, d: Decoded, state: StartingState | None, now: float,
-                         check_id: str | None) -> tuple[bool, str]:
-        """The escalation policy: ask the AI only for a new destination or a large amount.
-        It only chooses whether to ask; whatever the answer, the AI can only add checking."""
+                         check_id: str | None) -> tuple[str, str]:
+        """The escalation policy -> ("rules" | "ask" | "simulate", why in plain words).
+        A new destination goes straight to full simulation; the AI is asked only about a large
+        amount to a known destination. Whatever the AI says, it can only add checking."""
         s = self.settings
         pct = s.ai_check_min_pct
-        known = (tx.wallet_type is WalletType.TREASURY and d.destination in s.treasury_allowlist) \
-            or self.history.paid_before(tx.from_, d.destination, before=now, exclude=check_id)
+        known = (tx.wallet_type is WalletType.TREASURY and d.destination in s.treasury_allowlist)             or self.history.paid_before(tx.from_, d.destination, before=now, exclude=check_id)
+        if not known:
+            return "simulate", "New destination: full simulation"
         acct = state.accounts.get(tx.from_) if state is not None else None
         balance = None
         if acct is not None:
             balance = acct.balance if d.kind is Kind.NATIVE_TRANSFER else acct.token_balances.get(d.asset)
-        large = not balance or over_pct(d.amount, balance, pct)  # unknown balance counts as large
-        if known and not large:
-            return False, f"Known destination, small amount (at most {pct:g}% of the balance): AI check not needed"
-        amount = (f"amount above {pct:g}% of the wallet balance" if balance
-                  else "wallet balance unknown")
-        if not known and large:
-            return True, f"New destination for this wallet and {amount}: AI check asked"
-        if not known:
-            return True, "New destination for this wallet: AI check asked"
-        return True, f"Known destination, but {amount}: AI check asked"
+        if not balance:  # unknown balance counts as large
+            return "ask", "Known destination, wallet balance unknown: AI check asked"
+        if over_pct(d.amount, balance, pct):
+            return "ask", f"Known destination, amount above {pct:g}% of the wallet balance: AI check asked"
+        return "rules", f"Known destination, small amount (at most {pct:g}% of the balance): AI check not needed"
 
     def _escalation_check_in_slot(self, tx: TxRequest) -> tuple[LLMAssessment | None, str]:
         try:

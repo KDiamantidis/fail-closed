@@ -135,7 +135,7 @@
       "label": "test micro-transfer 0.0001 ETH",
       "expect": {
         "verdict": "ALLOW",
-        "path": "fast"
+        "path": "slow"
       },
       "request": {
         "wallet_type": "customer_hot",
@@ -484,7 +484,7 @@
       "label": "normal customer withdrawal, 1 ETH to another customer",
       "expect": {
         "verdict": "ALLOW",
-        "path": "fast"
+        "path": "slow"
       },
       "request": {
         "wallet_type": "customer_hot",

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from tests.api_helpers import ADMIN, SECRET_KEY, FakeRunner, client, scenario_request
+from tests.api_helpers import ADMIN, SECRET_KEY, FakeRunner, client, known, scenario_request
 
 pytestmark = pytest.mark.skipif(not __import__("tests.api_helpers", fromlist=["SCENARIOS"]).SCENARIOS.exists(),
                                 reason="scenarios/ not available")
@@ -24,11 +24,11 @@ def test_health_and_public_key(api):
 
 
 def test_check_is_a_dry_run_without_approval_even_on_allow(api):
-    c, _ = api
-    r = c.post("/check", json=scenario_request("a_customer_small_withdrawal")).json()
+    c, svc = api
+    r = c.post("/check", json=known(svc, scenario_request("a_customer_small_withdrawal"))).json()
     assert r["verdict"] == "ALLOW" and r["path"] == "fast" and r["dry_run"] is True
     assert "approval" not in r and "signature" not in str(r)
-    assert r["path_reasons"] and "total" in r["timings_ms"] and r["llm"]["mock"] is True
+    assert r["path_reasons"][-1].endswith("AI check not needed") and "total" in r["timings_ms"]
 
 
 def test_check_non_allow_has_no_approval(api):
@@ -90,8 +90,8 @@ def wait_for_event(c, check_id: str, kind: str, seconds: float = 5.0) -> list[st
 
 
 def test_stream_is_server_sent_events(api):
-    c, _ = api
-    c.post("/withdraw", json=scenario_request("a_customer_small_withdrawal"))
+    c, svc = api
+    c.post("/withdraw", json=known(svc, scenario_request("a_customer_small_withdrawal")))
     with c.stream("GET", "/stream?replay=3&limit=3") as r:
         assert r.headers["content-type"].startswith("text/event-stream")
         body = "".join(r.iter_text())

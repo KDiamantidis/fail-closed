@@ -1,7 +1,9 @@
-"""The fast-path escalation policy: the AI is asked only for a destination this wallet never
-paid before, or an amount above AI_CHECK_MIN_PCT (10%) of the wallet balance. At most
-AI_CHECK_CONCURRENCY AI calls at once; no free slot within the 2 s budget -> full simulation.
-Whatever happens, the AI can only add checking: never an ALLOW without the rules or a simulation.
+"""The fast-path escalation policy: a destination this wallet never paid before goes straight to
+full simulation (no AI check first). For a known destination the AI is asked only about an amount
+above AI_CHECK_MIN_PCT (10%) of the wallet balance. LLM_CONCURRENCY model calls at once, shared by
+fast-path checks and explanations, checks first; no free slot within the 2 s budget -> full
+simulation. Whatever happens, the AI can only add checking: never an ALLOW without the rules or a
+simulation.
 
 Real LLMExplainer with a fake OpenAI client, so the real call path runs.
 """
@@ -14,11 +16,13 @@ from app.config import Settings
 from app.models import Decision, Path
 from guard import Guard
 from history import History
-from llm import LLMExplainer
-from tests.test_guard import ETH, NOW, FakeRunner, StaticState, req
+from llm import CallSlots, LLMExplainer
+from tests.test_guard import CUST, ETH, HOT, NOW, FakeRunner, StaticState, req
 from tests.test_llm_fail_closed import SECRET, FakeClient, raise_429
 
 ANSWER = '{"intent_summary":"plain transfer","risk_score":5,"explanation":"ok","escalate":false}'
+BIG = 150 * ETH  # 15% of 1000 ETH: above 10%, below R3's 25%
+KNOWN = [CUST] + ["0x" + f"{i:02x}" * 20 for i in range(1, 4)]
 
 
 def no_concerns(**kw):
@@ -28,61 +32,64 @@ def no_concerns(**kw):
 def guard(behaviour=no_concerns, **kw):
     # R6 (hourly outflow) raised so a large-but-legal amount can reach the fast path in these tests
     s = Settings(vultr_inference_api_key=SECRET, llm_mode="live", r6_outflow_limit_wei=10**6 * ETH, **kw)
-    return Guard(s, History(), StaticState(), FakeRunner(), LLMExplainer(s, client=FakeClient(behaviour)),
-                 clock=lambda: NOW)
+    g = Guard(s, History(), StaticState(), FakeRunner(), LLMExplainer(s, client=FakeClient(behaviour)),
+              clock=lambda: NOW)
+    for to in KNOWN:  # destinations this wallet paid a week ago
+        g.history.seed_payout(HOT, to, 1, NOW - 7 * 86400, f"seed-{to[-4:]}")
+    return g
+
+
+def model_calls(g, model="glm-5.3-flash"):
+    return g.explainer.usage.snapshot()["calls_by_model"].get(model, 0)
 
 
 def test_known_destination_small_amount_no_ai_call():
     g = guard()
-    g.check(req(), now=NOW)  # first payout to this destination: the AI is asked
-    calls = g.explainer.client.calls
-    r = g.check(req(), now=NOW + 60)  # same wallet, same destination, 1 ETH of 1000 ETH
-    assert g.explainer.client.calls == calls  # no AI call
+    r = g.check(req())  # known destination, 1 ETH of 1000 ETH
+    assert g.explainer.client.calls == 0  # no AI call
     assert r.verdict.path is Path.FAST and r.verdict.verdict is Decision.ALLOW
     assert r.verdict.path_reasons[-1] == ("Known destination, small amount (at most 10% of the balance): "
                                           "AI check not needed")
     assert r.llm is None and "llm" not in r.timings
 
 
-def test_new_destination_asks_the_ai():
+def test_new_destination_goes_straight_to_full_simulation():
     g = guard()
-    r = g.check(req())
-    assert g.explainer.client.calls == 1
-    assert "New destination for this wallet: AI check asked" in r.verdict.path_reasons
-    assert r.verdict.path is Path.FAST and r.verdict.path_reasons[-1] == "LLM: no escalation"
+    r = g.check(req(to="0x" + "d7" * 20))
+    assert r.verdict.path is Path.SLOW and g.runner.calls == 1
+    assert r.verdict.verdict is Decision.ALLOW
+    assert r.verdict.path_reasons[-1] == "New destination: full simulation"
+    assert model_calls(g) == 0 and "llm" not in r.timings  # the AI was not asked first
+    r.explanation.result(timeout=5)  # ... but it still writes the explanation afterwards
+    assert model_calls(g, "glm-5.3") == 1
 
 
 def test_large_amount_to_a_known_destination_asks_the_ai():
     g = guard()
-    g.check(req(), now=NOW)
-    calls = g.explainer.client.calls
-    r = g.check(req(value=150 * ETH), now=NOW + 60)  # 15% of 1000 ETH: above 10%, below R3's 25%
-    assert g.explainer.client.calls == calls + 1
-    assert "Known destination, but amount above 10% of the wallet balance: AI check asked" in r.verdict.path_reasons
-    assert not r.verdict.findings or all(f.action is Decision.ALLOW for f in r.verdict.findings)
+    r = g.check(req(value=BIG))
+    assert g.explainer.client.calls == 1
+    assert "Known destination, amount above 10% of the wallet balance: AI check asked" in r.verdict.path_reasons
+    assert r.verdict.path is Path.FAST and r.verdict.path_reasons[-1] == "LLM: no escalation"
 
 
 def test_threshold_is_a_policy_value():
     g = guard(ai_check_min_pct=20.0)
-    g.check(req(), now=NOW)
-    calls = g.explainer.client.calls
-    r = g.check(req(value=150 * ETH), now=NOW + 60)  # 15% is under a 20% policy
-    assert g.explainer.client.calls == calls
+    r = g.check(req(value=BIG))  # 15% is under a 20% policy
+    assert g.explainer.client.calls == 0
     assert "at most 20% of the balance" in r.verdict.path_reasons[-1]
 
 
 def test_unknown_balance_counts_as_large():
-    from state_provider import StartingState
+    from decode import decode
 
     g = guard()
-    g.state_provider = StaticState(StartingState.model_validate({"accounts": {}}))
-    ask, why = g._ai_check_needed(req(), __import__("decode").decode(req(), []), None, NOW, None)
-    assert ask and "wallet balance unknown" in why
+    action, why = g._ai_check_needed(req(), decode(req(), []), None, NOW, None)
+    assert action == "ask" and why == "Known destination, wallet balance unknown: AI check asked"
 
 
 def test_ai_answer_429_on_the_policy_path_is_still_full_simulation():
     g = guard(raise_429)
-    r = g.check(req())
+    r = g.check(req(value=BIG))
     assert r.verdict.path is Path.SLOW and g.runner.calls == 1
     assert r.verdict.path_reasons[-1].startswith("AI check unavailable (rate limited (429)) -> full simulation")
 
@@ -98,17 +105,17 @@ def test_cap_reached_goes_to_full_simulation_never_fast_allow():
         release.wait(5)
         return no_concerns()
 
-    g = guard(blocked, ai_check_concurrency=1, fast_path_llm_timeout_seconds=0.3)
-    first = threading.Thread(target=g.check, args=(req(),))
+    g = guard(blocked, llm_concurrency=1, fast_path_llm_timeout_seconds=0.3)
+    first = threading.Thread(target=g.check, args=(req(value=BIG),))
     first.start()
     deadline = time.monotonic() + 3
     while g.explainer.client.calls < 1 and time.monotonic() < deadline:
         time.sleep(0.01)
     try:
-        r = g.check(req(to="0x" + "c2" * 20))  # a second new destination while the only slot is taken
+        r = g.check(req(to=KNOWN[1], value=BIG))  # a second large amount while the only slot is taken
         assert r.verdict.path is Path.SLOW and g.runner.calls >= 1  # full simulation, not the fast path
         assert r.verdict.path_reasons[-1].startswith(
-            "AI check unavailable (busy, 1 AI checks already running) -> full simulation")
+            "AI check unavailable (busy, 1 AI calls already running) -> full simulation")
         assert models.count("glm-5.3-flash") == 1  # no second fast-path AI call: the cap held
     finally:
         release.set()
@@ -120,16 +127,72 @@ def test_cap_waits_within_the_budget_for_a_free_slot():
         time.sleep(0.2)
         return no_concerns()
 
-    g = guard(quick, ai_check_concurrency=1, fast_path_llm_timeout_seconds=2.0)
+    g = guard(quick, llm_concurrency=1, fast_path_llm_timeout_seconds=2.0)
     out: list = []
-    threads = [threading.Thread(target=lambda i=i: out.append(g.check(req(to="0x" + f"{i:02x}" * 20))))
-               for i in range(1, 4)]
+    threads = [threading.Thread(target=lambda to=to: out.append(g.check(req(to=to, value=BIG))))
+               for to in KNOWN[1:]]
     for t in threads:
         t.start()
     for t in threads:
         t.join(10)
     assert len(out) == 3 and all(r.verdict.path is Path.FAST for r in out)  # each waited its turn
     assert g.explainer.client.calls == 3
+
+
+# ---- one shared limit: fast-path checks before explanations -----------------------------------
+
+def test_one_shared_limit_fast_checks_before_explanations():
+    """Explanations fill the slots; a fast-path check that arrives then gets the next free slot
+    before an explanation that was already waiting."""
+    slots = CallSlots(2)
+    order: list[str] = []
+    assert slots.acquire(fast=False) and slots.acquire(fast=False)  # 2 explanations running
+    waiting = threading.Thread(target=lambda: (slots.acquire(fast=False), order.append("explain")))
+    waiting.start()
+    time.sleep(0.05)
+    fast = threading.Thread(target=lambda: order.append("fast" if slots.acquire(fast=True, timeout=2) else "none"))
+    fast.start()
+    time.sleep(0.05)
+    slots.release()  # one slot frees: the fast check gets it, the explanation keeps waiting
+    fast.join(2)
+    time.sleep(0.05)
+    assert order == ["fast"]
+    slots.release()
+    waiting.join(2)
+    assert order == ["fast", "explain"] and slots.snapshot()["explain_waits"] == 1
+
+
+def test_fast_check_without_a_slot_in_time_gives_up():
+    slots = CallSlots(1)
+    slots.acquire(fast=False)  # a long explanation holds the only slot
+    t0 = time.monotonic()
+    assert slots.acquire(fast=True, timeout=0.2) is False and time.monotonic() - t0 < 1
+    slots.release()
+    assert slots.acquire(fast=False, timeout=0.2)  # a check that gave up does not block explanations
+
+
+def test_explanations_and_checks_share_the_limit():
+    """With 1 slot, a running explanation makes a large-amount check wait; past its budget the
+    check goes to full simulation (never ALLOW on the fast path)."""
+    release = threading.Event()
+
+    def slow_explanation(**kw):
+        if kw["model"] == "glm-5.3":
+            release.wait(5)
+        return no_concerns()
+
+    g = guard(slow_explanation, llm_concurrency=1, fast_path_llm_timeout_seconds=0.3)
+    first = g.check(req(to="0x" + "d8" * 20))  # new destination: simulation, explanation in the background
+    try:
+        deadline = time.monotonic() + 3
+        while g.explainer.slots.snapshot()["in_use"] < 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        r = g.check(req(value=BIG))
+        assert r.verdict.path is Path.SLOW
+        assert r.verdict.path_reasons[-1].startswith("AI check unavailable (busy, 1 AI calls already running)")
+    finally:
+        release.set()
+        first.explanation.result(timeout=5)
 
 
 def test_policy_off_switch_still_wins():
@@ -166,6 +229,7 @@ def test_explanation_falls_back_to_the_fast_model():
     a = e.explain(req(), None)
     assert a is not None and a.model == "glm-5.3-flash"
     assert e.usage.snapshot()["calls_by_model"] == {"glm-5.3": 1, "glm-5.3-flash": 1}
+    assert e.slots.snapshot()["in_use"] == 0  # both slots given back
 
 
 def test_explanation_event_names_the_model_that_wrote_it():

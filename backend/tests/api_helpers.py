@@ -74,5 +74,13 @@ def client(tmp_path, **kw) -> tuple[TestClient, Services]:
     return TestClient(create_app(svc)), svc
 
 
+def known(svc: Services, request: dict) -> dict:
+    """Make the request's destination a known one (an earlier payout from that wallet), so the
+    escalation policy may keep it on the fast path. Returns the request."""
+    svc.history.seed_payout(request["from"].lower(), request["to"].lower(), request["chain_id"], 0.0,
+                            f"seed-{request['from'][-4:]}-{request['to'][-4:]}")
+    return request
+
+
 def scenario_request(name: str, index: int = 0) -> dict:
     return load(SCENARIOS / f"{name}.json").requests[index].request

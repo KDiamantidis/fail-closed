@@ -17,7 +17,7 @@ from app.models import Decision, Path
 from guard import Guard
 from history import History
 from llm import LLMExplainer, LLMUnavailable, failure_kind
-from tests.test_guard import FakeRunner, StaticState, req
+from tests.test_guard import BIG, CUST, ETH, HOT, FakeRunner, StaticState, req
 
 URL = "https://api.example.invalid/v1/chat/completions"
 SECRET = "sk-test-SECRET-never-shown"
@@ -63,9 +63,13 @@ def slow_answer(**kw):
 
 
 def live_guard(behaviour, **kw):
-    s = Settings(vultr_inference_api_key=SECRET, llm_mode="live", llm_max_retries=1, **kw)
+    """A known destination and a large amount, so the fast-path AI check is asked (policy)."""
+    s = Settings(vultr_inference_api_key=SECRET, llm_mode="live", llm_max_retries=1,
+                 r6_outflow_limit_wei=10**6 * ETH, **kw)
     explainer = LLMExplainer(s, client=FakeClient(behaviour))
-    return Guard(s, History(), StaticState(), FakeRunner(), explainer, clock=lambda: 1_000_000.0)
+    g = Guard(s, History(), StaticState(), FakeRunner(), explainer, clock=lambda: 1_000_000.0)
+    g.history.seed_payout(HOT, CUST, 1, 1_000_000.0 - 7 * 86400, "seed")
+    return g
 
 
 CASES = [
@@ -79,7 +83,7 @@ CASES = [
 @pytest.mark.parametrize(("behaviour", "kind"), CASES, ids=["timeout", "error", "429", "invalid-json"])
 def test_unavailable_ai_check_goes_to_full_simulation(behaviour, kind, caplog):
     g = live_guard(behaviour)
-    r = g.check(req())  # a plain small transfer: fast path if the AI check said "no escalation"
+    r = g.check(req(value=BIG))  # a plain transfer: fast path if the AI check said "no escalation"
     assert r.verdict.path is Path.SLOW and g.runner.calls == 1  # full simulation ran
     assert f"AI check unavailable ({kind}) -> full simulation" in r.verdict.path_reasons[-1]
     assert r.verdict.verdict is Decision.ALLOW  # decided by the simulation, not BLOCK for the LLM
@@ -97,15 +101,16 @@ def test_unavailable_ai_check_goes_to_full_simulation(behaviour, kind, caplog):
 
 def test_ai_check_slower_than_the_fast_path_limit_goes_to_full_simulation():
     g = live_guard(slow_answer, fast_path_llm_timeout_seconds=0.2)
-    r = g.check(req())
+    r = g.check(req(value=BIG))
     assert r.verdict.path is Path.SLOW and g.runner.calls == 1
     assert "AI check unavailable (timeout 0.2 s) -> full simulation" in r.verdict.path_reasons[-1]
 
 
 def test_live_mode_without_key_is_not_configured_and_goes_to_full_simulation():
-    s = Settings(vultr_inference_api_key="", llm_mode="live")
+    s = Settings(vultr_inference_api_key="", llm_mode="live", r6_outflow_limit_wei=10**6 * ETH)
     g = Guard(s, History(), StaticState(), FakeRunner(), LLMExplainer(s), clock=lambda: 1_000_000.0)
-    r = g.check(req())
+    g.history.seed_payout(HOT, CUST, 1, 1_000_000.0 - 7 * 86400, "seed")
+    r = g.check(req(value=BIG))
     assert r.verdict.path is Path.SLOW
     assert "AI check unavailable (not configured)" in r.verdict.path_reasons[-1]
 

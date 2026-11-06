@@ -74,37 +74,68 @@ def req(**kw):
     return TxRequest.model_validate({**base, **kw})
 
 
+def paid(g, to=CUST, frm=HOT, chain_id=1):
+    """An earlier payout a week ago: `to` is a known destination for `frm` (escalation policy)."""
+    g.history.seed_payout(frm, to, chain_id, NOW - 7 * 86400, f"seed-{frm[-4:]}-{to[-4:]}-{chain_id}")
+    return g
+
+
+BIG = 150 * ETH  # 15% of HOT's 1000 ETH: above the 10% AI-check threshold, below R3's 25%
+
+
+def ai_guard(**kw):
+    """A known destination and a large amount: the fast-path AI check is asked (R6 raised so 150 ETH
+    stays legal)."""
+    return paid(guard(r6_outflow_limit_wei=10**6 * ETH, **kw))
+
+
 def erc20(to, amt):
     return "0xa9059cbb" + to[2:].rjust(64, "0") + format(amt, "064x")
 
 
 # --- fast path ---------------------------------------------------------------------
 
-def test_small_native_withdrawal_is_fast_allow():
-    g = guard()
+def test_small_native_withdrawal_to_a_known_destination_is_fast_allow():
+    g = paid(guard())
     r = g.check(req())
     assert (r.verdict.verdict, r.verdict.path) == (Decision.ALLOW, Path.FAST)
-    assert g.runner.calls == 0 and g.explainer.calls == 1
+    assert g.runner.calls == 0 and g.explainer.calls == 0
     assert "known-safe shape (native_transfer)" in r.verdict.path_reasons[0]
+    assert r.verdict.path_reasons[-1].endswith("AI check not needed")
+
+
+def test_first_payout_to_a_new_destination_is_fully_simulated():
+    g = guard()
+    r = g.check(req())
+    assert (r.verdict.verdict, r.verdict.path) == (Decision.ALLOW, Path.SLOW)
+    assert g.runner.calls == 1 and r.llm is None  # no AI check first
+    assert r.verdict.path_reasons[-1] == "New destination: full simulation"
+
+
+def test_large_amount_to_a_known_destination_asks_the_ai_and_stays_fast():
+    g = ai_guard()
+    r = g.check(req(value=BIG))
+    assert (r.verdict.verdict, r.verdict.path) == (Decision.ALLOW, Path.FAST)
+    assert g.runner.calls == 0 and g.explainer.calls == 1
     assert r.verdict.path_reasons[-1] == "LLM: no escalation"
 
 
 def test_known_token_transfer_is_fast():
-    r = guard().check(req(to=TOKEN, value=0, data=erc20(CUST, ETH)))
+    r = paid(guard()).check(req(to=TOKEN, value=0, data=erc20(CUST, ETH)))
     assert r.verdict.path is Path.FAST and "to a known token" in r.verdict.path_reasons[0]
 
 
 def test_llm_escalation_sends_to_slow_path_but_never_sets_verdict():
-    g = guard(explainer=FakeExplainer(escalate=True))
-    r = g.check(req())
+    g = ai_guard(explainer=FakeExplainer(escalate=True))
+    r = g.check(req(value=BIG))
     assert r.verdict.path is Path.SLOW and g.runner.calls == 1
     assert "LLM asked for a deeper check" in r.verdict.path_reasons
     assert r.verdict.verdict is Decision.ALLOW  # the sandbox found nothing, so still ALLOW
 
 
 def test_llm_failure_on_fast_path_goes_slow():
-    g = guard(explainer=FakeExplainer(fail=True))
-    r = g.check(req())
+    g = ai_guard(explainer=FakeExplainer(fail=True))
+    r = g.check(req(value=BIG))
     assert r.verdict.path is Path.SLOW and g.runner.calls == 1
     assert any("AI check unavailable (error) -> full simulation" in x for x in r.verdict.path_reasons)
 
@@ -177,9 +208,9 @@ def test_treasury_unknown_destination_above_limit_blocks_with_sandbox_evidence()
 # --- history, delay, errors -------------------------------------------------------------
 
 def test_every_check_is_recorded_with_path_and_reasons():
-    g = guard()
-    g.check(req())
-    [c] = g.history.checks()
+    g = ai_guard()
+    g.check(req(value=BIG))
+    c = g.history.checks()[-1]
     assert c["path"] == "fast" and c["verdict"] == "ALLOW" and c["path_reasons"]
     assert c["llm"]["risk_score"] == 50 and "total" in c["timings"]
 

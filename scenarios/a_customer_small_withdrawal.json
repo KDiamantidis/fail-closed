@@ -1,7 +1,7 @@
 {
   "name": "a_customer_small_withdrawal",
   "title": "(a) Customer hot wallet: small native withdrawal",
-  "description": "An ordinary customer withdrawal. Known-safe shape, no findings: fast path, no sandbox.",
+  "description": "An ordinary customer withdrawal, twice. The first payout to a new customer gets a full simulation (escalation policy: new destination). The second, a minute later to the same customer, is a known destination with a small amount: fast path, no sandbox, no AI call.",
   "labels": {
     "0x1000000000000000000000000000000000000a01": "customer hot wallet",
     "0xc000000000000000000000000000000000000a01": "customer"
@@ -15,7 +15,18 @@
   "requests": [
     {
       "t": 0,
-      "label": "0.5 ETH to a customer",
+      "label": "0.5 ETH to a new customer",
+      "expect": {"verdict": "ALLOW", "path": "slow"},
+      "request": {
+        "wallet_type": "customer_hot", "chain_id": 1,
+        "from": "0x1000000000000000000000000000000000000a01",
+        "to": "0xc000000000000000000000000000000000000a01",
+        "data": "0x", "value": "500000000000000000"
+      }
+    },
+    {
+      "t": 60,
+      "label": "0.5 ETH to the same customer again",
       "expect": {"verdict": "ALLOW", "path": "fast"},
       "request": {
         "wallet_type": "customer_hot", "chain_id": 1,

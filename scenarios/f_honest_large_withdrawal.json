@@ -28,7 +28,7 @@
     {
       "t": 60,
       "label": "next customer: 1 ETH",
-      "expect": {"verdict": "ALLOW", "path": "fast", "wallet_paused": false},
+      "expect": {"verdict": "ALLOW", "path": "slow", "wallet_paused": false},
       "request": {
         "wallet_type": "customer_hot", "chain_id": 1,
         "from": "0x1000000000000000000000000000000000000f01",

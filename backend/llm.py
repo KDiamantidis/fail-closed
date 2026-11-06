@@ -16,6 +16,7 @@ import re
 import threading
 import time
 from collections import Counter
+from contextlib import contextmanager
 from fractions import Fraction
 from typing import Any
 
@@ -67,6 +68,60 @@ def failure_kind(e: BaseException) -> str:
     if isinstance(e, openai.APIConnectionError):
         return "error (connection)"
     return "error"
+
+
+class CallSlots:
+    """One shared limit for every model call (LLM_CONCURRENCY). Fast-path checks go first:
+    while one waits, no explanation takes a free slot. Explanations wait in line (no deadline);
+    a fast-path check waits at most its budget, then the caller sends the request to full simulation."""
+
+    def __init__(self, n: int):
+        self.n = max(1, n)
+        self.used = 0
+        self.fast_waiting = 0
+        self.peak = 0
+        self.explain_waits = 0  # explanations that had to wait for a slot
+        self._cv = threading.Condition()
+
+    def acquire(self, fast: bool, timeout: float | None = None) -> bool:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        with self._cv:
+            if fast:
+                self.fast_waiting += 1
+            try:
+                waited = False
+                while not (self.used < self.n and (fast or self.fast_waiting == 0)):
+                    left = None if deadline is None else deadline - time.monotonic()
+                    if left is not None and left <= 0:
+                        return False
+                    waited = True
+                    self._cv.wait(left)
+                if waited and not fast:
+                    self.explain_waits += 1
+                self.used += 1
+                self.peak = max(self.peak, self.used)
+                return True
+            finally:
+                if fast:
+                    self.fast_waiting -= 1
+                    self._cv.notify_all()  # a waiting explanation may go now
+
+    def release(self) -> None:
+        with self._cv:
+            self.used -= 1
+            self._cv.notify_all()
+
+    @contextmanager
+    def slot(self, fast: bool = False):
+        self.acquire(fast)
+        try:
+            yield
+        finally:
+            self.release()
+
+    def snapshot(self) -> dict[str, int]:
+        with self._cv:
+            return {"limit": self.n, "in_use": self.used, "peak": self.peak, "explain_waits": self.explain_waits}
 
 
 class LLMUsage:
@@ -282,6 +337,7 @@ class LLMExplainer:
         self.settings = settings
         self._client = client
         self.usage = LLMUsage()
+        self.slots = CallSlots(settings.llm_concurrency)  # shared by fast-path checks and explanations
 
     @property
     def model_label(self) -> str:
@@ -323,15 +379,18 @@ class LLMExplainer:
 
     def explain(self, tx: TxRequest, sim: SimulationResult | None) -> LLMAssessment | None:
         """The background explanation card: VULTR_EXPLAIN_MODEL (bigger, slower) with its own
-        timeout, then the fast model if that fails. Never on the 2 s fast-path budget."""
+        timeout, then the fast model if that fails. Never on the 2 s fast-path budget.
+        Each call waits in line for a shared slot; fast-path checks go first."""
         s = self.settings
         big = s.vultr_explain_model.strip()
         if self.mode == "live" and big and big != s.vultr_model:
             try:
-                return self.assess_or_raise(tx, sim, model=big, timeout=s.llm_explain_timeout_seconds, retries=0)
+                with self.slots.slot(fast=False):
+                    return self.assess_or_raise(tx, sim, model=big, timeout=s.llm_explain_timeout_seconds, retries=0)
             except LLMUnavailable as e:
                 log.warning("explanation model failed (%s): falling back to the fast model", e.kind)
-        return self.assess(tx, sim)
+        with self.slots.slot(fast=False):
+            return self.assess(tx, sim)
 
     def assess_or_raise(self, tx: TxRequest, sim: SimulationResult | None, model: str | None = None,
                         timeout: float | None = None, retries: int | None = None) -> LLMAssessment:

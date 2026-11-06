@@ -38,7 +38,6 @@ class Settings(BaseSettings):
     # "" = use vultr_model for explanations too.
     vultr_explain_model: str = "glm-5.3"
     llm_explain_timeout_seconds: float = 20.0
-    llm_explain_concurrency: int = 2  # background explanations at once
     llm_mode: str = "auto"  # auto | mock | live
     llm_timeout_seconds: float = 15.0
     llm_max_retries: int = 1
@@ -52,10 +51,13 @@ class Settings(BaseSettings):
     # Fast path (Phase 2): the LLM may only ask "escalate to slow path"; LLM error -> slow path.
     fast_path_llm_escalation: bool = True
     fast_path_llm_timeout_seconds: float = 2.0  # escalation call only; timeout -> slow path
-    # Escalation policy: the AI is asked on the fast path only for a destination this wallet never
-    # paid before, or an amount above this share of the wallet balance. Otherwise the rules alone.
+    # Escalation policy: a destination this wallet never paid before -> full simulation (no AI
+    # check first). A known destination: the AI is asked on the fast path only for an amount above
+    # this share of the wallet balance; otherwise the rules alone.
     ai_check_min_pct: float = 10.0
-    ai_check_concurrency: int = 3  # fast-path AI calls at once; no slot within the budget -> full simulation
+    # One shared limit for ALL Vultr calls (fast-path checks and explanations). Fast-path checks
+    # go first; explanations wait in line. A fast check with no slot within its budget -> full simulation.
+    llm_concurrency: int = 3
 
     # Sandbox: fresh container per check, always destroyed.
     sandbox_image: str = "fail-closed-sandbox:foundry-v1.8.5"

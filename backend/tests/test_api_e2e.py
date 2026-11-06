@@ -32,10 +32,16 @@ def paused(c) -> set[str]:
 
 def test_a_small_withdrawal_is_signed(api):
     c, _ = api
+    # a new customer: full simulation first (escalation policy), then signed
     out = withdraw(c, scenario_request("a_customer_small_withdrawal"))
-    assert out["check"]["verdict"] == "ALLOW" and out["check"]["path"] == "fast"
+    assert out["check"]["verdict"] == "ALLOW" and out["check"]["path"] == "slow"
+    assert out["check"]["path_reasons"][-1] == "New destination: full simulation"
     assert out["approval"] is not None
     assert out["signer"]["signed"] is True and out["signer"]["signature"]
+    # the same customer again: a known destination and a small amount, rules alone, signed
+    again = withdraw(c, scenario_request("a_customer_small_withdrawal", 1))
+    assert again["check"]["path"] == "fast" and again["signer"]["signed"] is True
+    assert again["check"]["path_reasons"][-1].endswith("AI check not needed")
 
 
 def test_d_binance_is_refused_and_wallet_paused(api):
