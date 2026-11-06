@@ -93,7 +93,7 @@
   <rect x="938" y="562" width="176" height="152" rx="12" class="box"/>
   <text x="958" y="596" class="h">Circuit breaker</text>
   <circle cx="966" cy="620" r="6" fill="#dc6803"/><text x="980" y="625" class="s">1 freeze address</text>
-  <circle cx="966" cy="644" r="6" fill="#e62e05"/><text x="980" y="649" class="s">2 pause wallet</text>
+  <circle cx="966" cy="644" r="6" fill="#ec4a0a"/><text x="980" y="649" class="s">2 pause wallet</text>
   <circle cx="966" cy="668" r="6" fill="#d92d20"/><text x="980" y="673" class="s">3 safe mode</text>
   <circle cx="966" cy="692" r="6" fill="#7a271a"/><text x="980" y="697" class="s">4 global stop</text>
 
@@ -135,8 +135,13 @@
   <path d="M1026 512 V554" class="flow" marker-end="url(#a)"/>
   <path d="M1114 486 C1132 486 1128 630 1142 630" class="red" marker-end="url(#r)"/>
   <text x="1150" y="576" font-size="13" font-weight="700" fill="#b42318">BLOCK</text>
+  <path d="M1114 662 H1142" class="red" marker-end="url(#r)"/>
+  <text x="1152" y="704" font-size="14.5" font-weight="600" fill="#b42318">from the breaker: frozen or paused → block</text>
   <path d="M342 502 V692" class="flow" marker-end="url(#a)" marker-start="url(#a)"/>
   <path d="M524 516 V692" class="flow" marker-end="url(#a)"/>
+
+  <path d="M1460 400 V316" class="allow" marker-end="url(#g)"/>
+  <text x="1460" y="304" text-anchor="middle" font-size="15" font-weight="700" fill="#0f766e">signed transaction</text>
 
   <!-- AI: dashed, advice only -->
   <path d="M880 190 V288" class="ai" marker-end="url(#g)"/>
