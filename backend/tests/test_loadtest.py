@@ -43,19 +43,23 @@ def test_run_config_measures_and_stops_the_attack():
     assert r["attacks_stopped"] == 1 and r["attack_result"]["verdict"] == "BLOCK"
     assert r["normal_not_allowed"] == 0, r["normal_not_allowed_by_rule"]
     assert r["normal_signed"] == 60
-    assert r["latency_ms"]["fast"]["n"] > 50 and r["latency_ms"]["fast"]["p99"] is not None
-    assert r["escalated"] <= r["ai_asked"] and r["latency_ms"]["slow"]["n"] == r["escalated"] + 1
     assert r["llm"]["mode"] == "mock"
-    # the escalation policy: the AI is asked for new destinations only (amounts here are small)
-    assert r["ai_asked"] == r["new_destinations"] and 0 < r["ai_asked"] < 20
-    assert r["llm"]["calls"] == r["ai_asked"] + r["escalated"] + 1  # + an explanation per slow-path check
+    # the escalation policy: new destinations go straight to full simulation, the AI is asked
+    # only about large amounts to known destinations
+    assert r["new_dest_simulated"] == r["new_destinations"] > 0
+    assert r["ai_asked"] == r["large_amounts"] > 0
+    assert r["latency_ms"]["slow"]["n"] == r["new_destinations"] + r["escalated"] + 1
+    assert r["latency_ms"]["fast"]["n"] == 60 - r["new_destinations"] - r["escalated"]
+    # a call per AI check, plus an explanation per slow-path check
+    assert r["llm"]["calls"] == r["ai_asked"] + r["latency_ms"]["slow"]["n"]
+    assert r["llm_slots"]["peak"] <= r["llm_slots"]["limit"] == 3
 
 
-def test_policy_asks_every_new_destination_and_escalation_sends_it_to_simulation():
+def test_policy_large_amounts_ask_the_ai_and_escalation_sends_them_to_simulation():
     base = Settings(mock_llm_latency_ms=0, mock_llm_escalate_rate=1.0)  # the mock escalates every plain transfer
     r = run_config("fresh/escalation-on", CONFIGS["fresh/escalation-on"], base, n_normal=60, runner=FakeRunner())
-    assert r["escalated"] == r["ai_asked"] == r["new_destinations"] > 0
-    assert r["latency_ms"]["fast"]["n"] == 60 - r["new_destinations"]  # known destinations: rules alone
+    assert r["escalated"] == r["ai_asked"] == r["large_amounts"] > 0
+    assert r["latency_ms"]["fast"]["n"] == 60 - r["new_destinations"] - r["large_amounts"]  # rules alone
     assert r["normal_not_allowed"] == 0
 
 
@@ -70,6 +74,7 @@ def test_markdown_table_says_mock_llm():
     r = run_config("fresh/escalation-on", CONFIGS["fresh/escalation-on"], BASE, n_normal=20, runner=FakeRunner())
     md = markdown_table([r], {"os": "test", "cpus": 4, "docker": "x"})
     assert "Mock LLM" in md and "| fresh/escalation-on | 1/1 | 0 |" in md
+    assert "New destinations (simulated) | Large amounts (AI asked)" in md
 
 
 @pytest.mark.skipif(not SCENARIOS.exists(), reason="scenarios/ not available")

@@ -1,4 +1,4 @@
-"""Load demo: 500 normal withdrawals + 1 hidden Binance-style attack, through the real Guard.
+"""Load demo: 500 normal withdrawals + 1 hidden EIP-7702 delegation attack, through the real Guard.
 
 Every request takes the full /withdraw path: Guard check -> approval (ALLOW only) -> mock signer.
 Measured: attacks stopped, normal requests NOT allowed (by verdict and rule; goal 0),
@@ -9,7 +9,11 @@ Workload (seeded, reproducible):
 - chains 1 / 10 / 42161 / 137; amounts log-normal (ETH ~0.3, tokens ~500 units)
 - destinations: ~90% returning customers (each tied to one wallet and one chain, paid before:
   the run starts with one earlier payout per returning customer in its history, a week back),
-  ~10% (NEW_DEST_SHARE) addresses the wallet never paid, so the AI escalation policy is used
+  ~10% (NEW_DEST_SHARE) addresses the wallet never paid: the escalation policy sends those
+  straight to full simulation
+- ~4% (LARGE_SHARE) of returning-customer payouts are large token payouts, 12-20% of the
+  wallet's token balance (above the 10% AI-check threshold, below R3's 25%): the fast-path AI
+  check is asked for these
 - spread over 10 simulated hours (the history windows see realistic timing)
 - the attack: a 4th hot wallet is asked to sign 3 EIP-7702 authorizations to a sweeper,
   hidden at a random position. It is a wallet that serves no customers in this run, so the
@@ -42,7 +46,7 @@ from app.models import Decision, TxRequest
 from approval import Approver, GuardKey
 from breaker import Breaker
 from guard import Guard
-from history import CheckRecord, History
+from history import History
 from llm import LLMExplainer
 from sandbox_gate import GuardBusy, SandboxGate
 from sandbox_runner import SandboxRunner
@@ -59,6 +63,8 @@ TOKENS = {"0x70c00000000000000000000000000000000000a1": "mUSDC",
           "0x70c00000000000000000000000000000000000a3": "mDAI"}
 CHAINS, CHAIN_WEIGHTS = [1, 10, 42161, 137], [0.5, 0.2, 0.2, 0.1]
 ATTACK_NONCE = 1000
+TOKEN_BALANCE_UNITS = 1_000_000  # per wallet and token; normal token payouts are at most 5% of it
+LARGE_SHARE = 0.04
 
 CONFIGS = {
     "fresh/escalation-on": {"sandbox_mode": "fresh", "fast_path_llm_escalation": True},
@@ -75,7 +81,8 @@ class Item:
     tx: TxRequest
     attack: bool
     kind: str
-    new_dest: bool = False  # a destination this wallet never paid before (the AI check is asked)
+    new_dest: bool = False  # a destination this wallet never paid before (full simulation)
+    large: bool = False  # a known destination, amount above 10% of the balance (the AI check is asked)
 
 
 def _addr(rng: random.Random) -> str:
@@ -83,7 +90,8 @@ def _addr(rng: random.Random) -> str:
 
 
 def build_workload(n_normal: int = 500, seed: int = 7, hours: float = 10.0,
-                   new_dest_share: float = 0.1) -> tuple[list[Item], StartingState, dict]:
+                   new_dest_share: float = 0.1, large_share: float = LARGE_SHARE,
+                   ) -> tuple[list[Item], StartingState, dict]:
     rng = random.Random(seed)
     regulars = [(_addr(rng), rng.choices(CHAINS, CHAIN_WEIGHTS)[0], rng.choice(HOT)) for _ in range(200)]
     times = sorted(rng.uniform(0, hours * 3600) for _ in range(n_normal))
@@ -94,7 +102,14 @@ def build_workload(n_normal: int = 500, seed: int = 7, hours: float = 10.0,
             dest, chain, wallet = _addr(rng), rng.choices(CHAINS, CHAIN_WEIGHTS)[0], rng.choice(HOT)
         else:
             dest, chain, wallet = rng.choice(regulars)
-        if rng.random() < 0.55:
+        large = not new and rng.random() < large_share
+        if large:  # 12-20% of the wallet's token balance: the AI check is asked
+            token = rng.choice(list(TOKENS))
+            units = int(rng.uniform(0.12, 0.20) * TOKEN_BALANCE_UNITS)
+            data = "0xa9059cbb" + dest[2:].rjust(64, "0") + format(units * ETH, "064x")
+            body = {"to": token, "value": "0", "data": data}
+            kind = TOKENS[token]
+        elif rng.random() < 0.55:
             wei = int(min(8.0, max(0.005, rng.lognormvariate(math.log(0.3), 1.0))) * ETH)
             body = {"to": dest, "value": str(wei), "data": "0x"}
             kind = "native"
@@ -105,7 +120,7 @@ def build_workload(n_normal: int = 500, seed: int = 7, hours: float = 10.0,
             body = {"to": token, "value": "0", "data": data}
             kind = TOKENS[token]
         tx = TxRequest.model_validate({"wallet_type": "customer_hot", "chain_id": chain, "from": wallet, **body})
-        items.append(Item(i, t, tx, False, kind, new))
+        items.append(Item(i, t, tx, False, kind, new, large))
 
     pos = rng.randrange(1, n_normal)
     t_attack = (items[pos - 1].t + items[pos].t) / 2
@@ -118,7 +133,7 @@ def build_workload(n_normal: int = 500, seed: int = 7, hours: float = 10.0,
         it.index = i
 
     accounts: dict[str, Any] = {w: {"balance": str(20_000 * ETH), "nonce": 50_000,
-                                     "token_balances": {t: str(10**9 * ETH) for t in TOKENS}} for w in HOT}
+                                     "token_balances": {t: str(TOKEN_BALANCE_UNITS * ETH) for t in TOKENS}} for w in HOT}
     accounts[ATTACKED] = {"balance": str(3_000 * ETH), "nonce": ATTACK_NONCE}
     accounts[SWEEPER] = {"code": "artifact:MockSweeper"}
     for t in TOKENS:
@@ -136,11 +151,7 @@ def seed_known_payouts(history: History, items: list[Item]) -> int:
     customer, so "a destination this wallet paid before" means the same as in production."""
     known = sorted({(it.tx.from_, dest_of(it), it.tx.chain_id) for it in items if not it.attack and not it.new_dest})
     for n, (wallet, dest, chain) in enumerate(known):
-        history.record_check(CheckRecord(
-            id=f"seed-{n}", ts=T0 - 7 * 86400, wallet=wallet, chain_id=chain, wallet_type="customer_hot",
-            kind="native_transfer", destination=dest, asset="native", amount=10**16, path="fast",
-            path_reasons=["earlier payout (load-test history seed)"], verdict="ALLOW", findings=[], timings={},
-            llm=None, request={}))
+        history.seed_payout(wallet, dest, chain, T0 - 7 * 86400, f"seed-{n}", "earlier payout (load-test history seed)")
     return len(known)
 
 
@@ -210,7 +221,9 @@ def run_config(name: str, overrides: dict, base: Settings, n_normal: int = 500, 
         except GuardBusy as e:
             v, path, rules, signed, reasons, detail, timing = "BUSY", "-", ["503"], False, [], str(e), {}
         row = {"i": it.index, "attack": it.attack, "kind": it.kind, "chain": it.tx.chain_id, "verdict": v,
-               "new_dest": it.new_dest, "ai_asked": any(r.endswith(": AI check asked") for r in reasons),
+               "new_dest": it.new_dest, "large": it.large,
+               "ai_asked": any(r.endswith(": AI check asked") for r in reasons),
+               "new_dest_simulated": "New destination: full simulation" in reasons,
                "path": path, "rules": rules, "signed": signed, "ms": round((time.perf_counter() - t0) * 1000, 1),
                "escalated": any("LLM asked" in r for r in reasons),
                "ai_unavailable": next((r[len("AI check unavailable ("):].split(") -> ")[0] for r in reasons
@@ -251,7 +264,10 @@ def run_config(name: str, overrides: dict, base: Settings, n_normal: int = 500, 
         "paths": dict(Counter(r["path"] for r in rows)),
         "escalated": sum(1 for r in rows if r["escalated"]),
         "new_destinations": sum(1 for r in normal if r["new_dest"]),
+        "new_dest_simulated": sum(1 for r in rows if r["new_dest_simulated"]),
+        "large_amounts": sum(1 for r in normal if r["large"]),
         "ai_asked": sum(1 for r in rows if r["ai_asked"]),
+        "llm_slots": explainer.slots.snapshot(),
         "latency_ms": {p: {"n": len(v), "p50": _pct(v, .5), "p95": _pct(v, .95), "p99": _pct(v, .99),
                            "mean": round(statistics.mean(v), 1) if v else None} for p, v in lat.items()},
         "total_seconds": round(total, 2), "throughput_rps": round(len(rows) / total, 1),
@@ -288,9 +304,9 @@ def markdown_table(results: list[dict], machine: dict) -> str:
         "",
         "| Config | Attack stopped | Normal not ALLOWed | Fast path p50 / p95 / p99 ms | Slow path p50 / p95 / p99 ms "
         "| Throughput | Total | Sandboxes started |"
-        + (" New destinations | AI asked | Escalated | AI check unavailable | LLM calls (failed) | 429s | Cost |"
-           if live else ""),
-        "|---|---|---|---|---|---|---|---|" + ("---|---|---|---|---|---|---|" if live else ""),
+        " New destinations (simulated) | Large amounts (AI asked) | Escalated | AI check unavailable "
+        "| LLM calls (failed) | 429s | Cost |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
         na = r["normal_not_allowed"]
@@ -298,18 +314,19 @@ def markdown_table(results: list[dict], machine: dict) -> str:
         lines.append(
             f"| {r['config']} | {r['attacks_stopped']}/{r['attacks']} | {na}{f' ({why})' if why else ''} "
             f"| {lat(r, 'fast')} | {lat(r, 'slow')} | {r['throughput_rps']} req/s | {r['total_seconds']} s "
-            f"| {r['sandboxes_started']} |" + (live_cells(r) if live else ""))
+            f"| {r['sandboxes_started']} |" + ai_cells(r))
     return "\n".join(lines) + "\n"
 
 
-def live_cells(r: dict) -> str:
+def ai_cells(r: dict) -> str:
     u = r["llm"]
     unav = r["ai_unavailable"]
     why = ", ".join(f"{k} {v}" for k, v in r["ai_unavailable_by_reason"].items())
     failed = sum(u["failures"].values())
     cost = f"${u['cost_usd']:.4f}" if u.get("cost_usd") is not None else "n/a"
     n429 = u["failures"].get("rate limited (429)", 0)
-    return (f" {r['new_destinations']} | {r['ai_asked']} | {r['escalated']} | {unav}{f' ({why})' if why else ''} "
+    return (f" {r['new_destinations']} ({r['new_dest_simulated']}) | {r['large_amounts']} ({r['ai_asked']}) "
+            f"| {r['escalated']} | {unav}{f' ({why})' if why else ''} "
             f"| {u['calls']} ({failed}) | {n429} | {cost} |")
 
 
