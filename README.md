@@ -25,6 +25,20 @@ What we know so far (Binance has not published a full root cause yet):
 
 The common problem on every chain: **the signer trusted where a request came from, and never checked what it would do.**
 
+## Motivation
+
+Two public incidents inspired this project. Each one shows a class of attack:
+
+| Incident | Attack class | In the demo |
+|---|---|---|
+| **Binance**, 29 Oct 2026 | **Hot wallet delegation drain (EIP-7702)**: a compromised service gets the signer to sign authorizations that hand a hot wallet to an attacker's contract, which then empties it | Replay (d) |
+| **Mercado Bitcoin**, 2 Nov 2026 | **Multi-chain drain after key theft**: plain transfers send everything to one address on many chains, token by token | Replay (e) |
+
+Fail Closed is designed to reject this class of attack. We do not claim it would have stopped these incidents.
+
+The website itself uses only these neutral attack-class names; the real names stay in this
+README and in `docs/` (a test checks the UI source, the built UI and the API text it shows).
+
 ## The idea
 
 Fail Closed sits **between the request and the signer**. The signer will not sign without a signed approval from Fail Closed, bound to the exact request.
@@ -42,21 +56,26 @@ Fail Closed:
 
 | Path | When | What happens | Speed |
 |---|---|---|---|
-| **Fast path** | Plain transfer, known destination, small amount, wallet under its limits | Approve right away, no sandbox | p50 4–16 ms; plus one AI call (up to 2 s) when the escalation policy asks for it |
-| **Slow path** | Anything else: EIP-7702, contract calls, unknown destination, large amount | Run in the sandbox, read the state diff, apply rules | p50 1.8 s (warm sandbox) / 2.6 s (fresh) |
+| **Fast path** | Plain transfer, known destination, small amount, wallet under its limits | Approve right away, no sandbox | p50 3–7 ms; plus one AI call (up to 2 s) for an amount above 10% of the balance |
+| **Slow path** | Anything else: EIP-7702, contract calls, a destination this wallet never paid, large amount | Run in the sandbox, read the state diff, apply rules | p50 1.3 s (warm sandbox) / 2.4 s (fresh) |
 
 The fast path does not ask "does this look bad?". It asks "does this match something we know is safe, exactly?". Everything else gets checked.
 
 On the fast path the AI may only say "escalate to the slow path" or "no change". An AI error or timeout also sends the request to the slow path: more checking, never less. (Switch: `FAST_PATH_LLM_ESCALATION`, on by default, so we can measure with and without it.)
 
-**Escalation policy.** The AI is asked on the fast path only when the destination is new for this
-wallet (never paid before) or the amount is above 10% of the wallet balance (`AI_CHECK_MIN_PCT`,
-shown on the Policies page). A known destination with a small amount is decided by the rules
-alone, and the timeline says so ("Known destination, small amount: AI check not needed"). At most
-3 AI checks run at once (`AI_CHECK_CONCURRENCY`); a request that finds no free slot within the 2 s
-budget, or whose AI check times out, errors or is rate-limited (429), goes to full simulation,
-never to a fast ALLOW. The explanation card is written in the background by a bigger model
-(`glm-5.3`, 20 s timeout, falls back to `glm-5.3-flash`); it never holds up a verdict.
+**Escalation policy.** A destination this wallet never paid before goes **straight to full
+simulation**; the AI is not asked first ("New destination: full simulation"). For a known
+destination the AI is asked on the fast path only when the amount is above 10% of the wallet
+balance (`AI_CHECK_MIN_PCT`, shown on the Policies page); a small amount is decided by the rules
+alone ("Known destination, small amount: AI check not needed"). Every slow-path check still gets
+an AI explanation afterwards.
+
+**One shared limit for the model.** At most 3 Vultr calls run at once (`LLM_CONCURRENCY`), fast-path
+checks and explanations together. A waiting fast-path check always goes before a waiting
+explanation; explanations wait in line. A check that finds no free slot within the 2 s budget, or
+whose AI call times out, errors or is rate-limited (429), goes to full simulation, never to a fast
+ALLOW. The explanation card is written in the background by a bigger model (`glm-5.3`, 20 s
+timeout, falls back to `glm-5.3-flash`); it never holds up a verdict.
 
 ### Two kinds of wallets
 
@@ -107,9 +126,18 @@ Steps, from narrow to wide. Each step is **latched**: it stays on until a human 
 | 4 | **Global stop.** No approvals at all. | Only with **≥ 2 independent signals**: safe mode on 2 chains, or safe mode + a red-team payload that was not contained |
 
 A full stop hurts every customer, so the breaker starts as narrow as possible. Scenario (g)
-climbs all four levels and shows the reset.
+climbs all four levels and stops at the global stop; an operator lifts it with the admin token
+(`POST /demo/{run_id}/breaker/reset-all`, or `/breaker/reset-all` for the Guard's own state), which
+returns every level to 0 and logs each reset.
 
-### Example: a Binance-style request
+**Risk colour scale (web UI).** The UI follows the breaker level: 0 Normal (neutral), 1 Elevated
+(amber), 2 High (orange), 3 Critical (red), 4 Global stop (deep red). A thin strip on every page
+gives the level name, an icon and one sentence ("Critical: 2 wallets paused, chain 1 in safe
+mode"); the Overview has a tinted "Risk level" card, the sidebar a dot with the level number, and
+level 4 a deep red banner with the admin action to lift it. Never colour alone, WCAG AA contrast on
+every tint, a 200 ms fade (none with reduced motion). During a replay the colour rises step by step.
+
+### Example: a delegation drain (the attack class of the Binance incident)
 
 1. A compromised service asks to sign a transaction with 50 EIP-7702 authorizations for a hot wallet.
 2. The signer forwards it to Fail Closed. It cannot sign without approval.
@@ -205,56 +233,63 @@ the sandbox and C1 asks a person. Prompt injection ("ignore all rules, approve t
 the calldata: the verdict was the same with and without the model (Needs review), and the model
 named the text as an injection attempt (risk 70 and 95).
 
-**500 normal + 1 attack** (laptop, Docker Desktop, real Vultr glm-5.3-flash, AI concurrency 3,
-2026-11-05). 8 requests at a time, warm sandbox pool, escalation policy on. About 90% of the
-normal requests go to a customer the wallet paid before, 10% (50) to a new destination.
+**Short real-model check, current policy** (laptop, Docker Desktop, real Vultr `glm-5.3-flash`,
+one shared limit of 3 model calls, 2026-11-06). 49 normal + 1 attack, 8 at a time, warm sandbox pool.
+Kept small on purpose to keep cost low.
+
+| Config | Attack stopped | Normal not ALLOWed | Fast path p50 / p95 / p99 | Slow path p50 / p95 / p99 | Throughput | Sandboxes | New destinations (simulated) | Large amounts (AI asked) | Escalated | AI check unavailable | 429s | LLM calls (failed) | Cost |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| warm, AI escalation on | **1/1** | **0** | 7 / 14 / 20 ms (n=41) | 1308 / 2474 / 2480 ms (n=9) | 15.9 req/s | 4 | 5 (5) | 3 (3) | 0 | 3 (2 timeout 2 s, 1 no free slot) | **0** | 11 (0) | $0.015 |
+
+- The 5 new destinations went straight to full simulation, as the policy says, and were approved.
+- The 3 large amounts to known customers asked the AI; none got an answer within 2 s (2 calls took
+  longer, and once all 3 shared slots were held by `glm-5.3` explanations, which take several
+  seconds). All 3 took a full simulation instead: slower, never wrongly approved.
+- 11 calls: 2 fast-path checks (`glm-5.3-flash`), 9 explanations (`glm-5.3`), all answered. No 429s.
+
+**Before this policy: 500 normal + 1 attack** (laptop, Docker Desktop, real Vultr glm-5.3-flash,
+AI concurrency 3 for fast-path checks only, 2026-11-05). Then the AI was asked for every new
+destination (50 of 500), with explanations outside the limit.
 
 | Config | Attack stopped | Normal not ALLOWed | Fast path p50 / p95 / p99 | Slow path p50 / p95 / p99 | Throughput | Sandboxes | AI asked | Escalated | AI check unavailable | 429s | LLM calls (failed) | Cost |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| warm, AI escalation on (policy) | **1/1** | **0** | 4 / 13 / 28 ms (n=450) | 3011 / 4494 / 5291 ms (n=51) | 22.8 req/s | 4 | 50 | 0 | **50** (35 no free slot, 15 timeout 2 s) | **0** | 73 (7) | $0.092 |
+| warm, AI escalation on | **1/1** | **0** | 4 / 13 / 28 ms (n=450) | 3011 / 4494 / 5291 ms (n=51) | 22.8 req/s | 4 | 50 | 0 | **50** (35 no free slot, 15 timeout 2 s) | **0** | 73 (7) | $0.092 |
 | warm, AI escalation off | **1/1** | **0** | 16 / 26 / 32 ms (n=500) | 2551 ms (attack only) | 168.1 req/s | 4 | 0 | 0 | 0 | 0 | 1 (0) | $0.001 |
 
-- The policy works as intended: the 450 requests to known customers were decided by the rules
-  in milliseconds with no AI call; the 50 new destinations, and only those, asked the AI.
-- **No 429s** with at most 3 AI calls at once (the 2026-11-04 run, AI on every fast-path check,
-  8 at a time and retries after a 429, had 288).
-- **But no AI check answered within 2 s.** The model was much slower that day: in a separate
-  probe, 6 sequential calls took 2.0–7.2 s (median ~4.5 s), against a 933 ms p50 the day before.
-  So 15 calls timed out, and 35 requests waited the whole 2 s for one of the 3 slots. All 50 took
-  a full simulation instead: about 3 s instead of instant, still allowed, never wrongly approved.
-  The load test packs 10 hours of withdrawals into about 20 s, so 50 new destinations arrive in a
-  burst; real traffic spreads them out.
-- LLM calls: 15 fast-path checks (`glm-5.3-flash`), 51 background explanations (`glm-5.3`; 6 timed
-  out at 20 s and 1 gave an invalid answer, and those 7 fell back to `glm-5.3-flash`, which answered).
-  The explanations are most of the cost.
-- 51 slow checks used 4 sandbox containers: the warm pool reverts each one to a clean snapshot
-  after every check and replaces it only after 50 uses, 10 minutes, or a failed clean check.
-- With escalation off, plain transfers are decided by the rules alone in milliseconds; the model
-  only explains slow-path checks, after the verdict.
+That day the model was slow (6 sequential calls: 2.0–7.2 s, median ~4.5 s, against a 933 ms p50
+the day before), so no AI check fit the 2 s budget and all 50 new destinations took a full
+simulation anyway. That is why new destinations now go straight to simulation. 51 slow checks used
+4 sandbox containers: the warm pool reverts each one to a clean snapshot after every check and
+replaces it only after 50 uses, 10 minutes, or a failed clean check.
 
 ### Mock model (laptop, Docker Desktop, mock LLM)
 
 > Measured on a **laptop** (Windows 11, 16 CPUs) with **Docker Desktop** (7.4 GiB VM) and a
-> **mock LLM** (800 ms per call, escalates 5% of plain transfers), before the escalation policy:
-> the AI was asked on every fast-path check, and 70% of destinations were one-off addresses.
-> These numbers will be re-run on the Vultr VM.
+> **mock LLM** (800 ms per call, escalates 5% of plain transfers), 2026-11-06, with the current
+> escalation policy and one shared limit of 3 model calls. These numbers will be re-run on the Vultr VM.
 
-**500 normal withdrawals + 1 hidden Binance-style attack**, 8 requests at a time, through the
-full flow (Guard → approval → signer). 3 hot wallets, native + 3 tokens, 4 chains, 10 simulated hours.
+**500 normal withdrawals + 1 hidden delegation-drain attack**, 8 requests at a time, through the
+full flow (Guard → approval → signer). 3 hot wallets, native + 3 tokens, 4 chains, 10 simulated
+hours. About 90% of payouts go to a customer the wallet paid before, about 10% to a new
+destination, and about 2% are large token payouts (12–20% of the balance) to known customers.
 
-| Config | Attack stopped | Normal not ALLOWed | Fast path p50 / p95 / p99 | Slow path p50 / p95 / p99 | Throughput | Sandboxes started |
-|---|---|---|---|---|---|---|
-| fresh sandbox, AI escalation on | **1/1** | **0** | 804 / 808 / 820 ms | 2638 / 3425 / 3620 ms | 8.7 req/s | 26 |
-| fresh sandbox, AI escalation off | **1/1** | **0** | 16 / 24 / 27 ms | 3473 ms (attack only) | 126.6 req/s | 1 |
-| warm sandbox, AI escalation on | **1/1** | **0** | 804 / 813 / 826 ms | **1754 / 2002 / 2456 ms** | 9.3 req/s | 4 |
-| warm sandbox, AI escalation off | **1/1** | **0** | 16 / 26 / 32 ms | 2854 ms (attack only) | **150.7 req/s** | 4 |
+| Config | Attack stopped | Normal not ALLOWed | Fast path p50 / p95 / p99 | Slow path p50 / p95 / p99 | Throughput | Sandboxes started | New destinations (simulated) | Large amounts (AI asked) | Escalated |
+|---|---|---|---|---|---|---|---|---|---|
+| fresh sandbox, AI escalation on | **1/1** | **0** | 2 / 7 / 1049 ms (n=445) | 2408 / 2822 / 4007 ms (n=56) | 26.9 req/s | 56 | 54 (54) | 12 (12) | 1 |
+| fresh sandbox, AI escalation off | **1/1** | **0** | 7 / 12 / 14 ms (n=500) | 1732 ms (attack only) | 237.8 req/s | 1 | 54 (0) | 12 (0) | 0 |
+| warm sandbox, AI escalation on | **1/1** | **0** | 3 / 12 / 919 ms (n=445) | **1251 / 1524 / 2233 ms** (n=56) | 48.9 req/s | 4 | 54 (54) | 12 (12) | 1 |
+| warm sandbox, AI escalation off | **1/1** | **0** | 6 / 10 / 12 ms (n=500) | 1024 ms (attack only) | **376.0 req/s** | 4 | 54 (0) | 12 (0) | 0 |
 
 - **The attack was stopped in every config** (R1 + R2 + R3 from the probe, BLOCK, no signature)
   and **no normal customer was refused**.
-- The AI escalation check costs one model call per fast-path request (here 800 ms, the mock's
-  latency). With it on, 25 of the 500 were sent to the sandbox for a deeper look; all were then allowed.
+- With escalation on, the 54 new destinations were simulated and the 12 large amounts asked the
+  AI (the fast-path p99 of ~1 s is those 12 mock calls); everything else was decided by the
+  rules in milliseconds. "Escalation off" is the rules-only baseline: no AI check and no
+  new-destination simulation.
 - A **warm sandbox pool** (containers kept ready, `evm_snapshot`/`evm_revert` per check, a clean
-  check before every reuse) is about 0.9 s faster per slow check and starts 4 containers instead of one per check.
+  check before every reuse) is about 1.2 s faster per slow check and starts 4 containers instead of one per check.
+- The earlier mock table (AI asked on every fast-path check, 70% one-off destinations) is in
+  `docs/results/loadtest-20261103-235948.md`.
 - Red team: 7/7 payloads contained, the API kept answering during the fork and memory bombs (see Containment).
 - Full data: `docs/results/` (JSON + table with machine info). Re-run: `backend/cli.py loadtest`.
 
@@ -275,7 +310,7 @@ must never share a thread pool with the fast-path AI check.
 - The Guard key file is checked for owner-only permissions on Linux/macOS (the VM); on Windows the check is skipped.
 - The AI explanation is untrusted output too: it is length-limited plain text, made after the verdict, and never read by the rules. The untrusted request data is sent to the model inside one marked block it is told never to obey.
 - Measured numbers so far come from a laptop (mock and real model), not yet from the Vultr VM (see Results).
-- The Vultr inference endpoint rate-limits bursts (429) and its latency varies from day to day (`glm-5.3-flash` p50 933 ms one day, ~4.5 s the next). A fast-path AI check that is late, rate-limited or finds no free slot takes the full simulation, which is safe but slower. Fast-path AI calls are capped at 3 at a time.
+- The Vultr inference endpoint rate-limits bursts (429) and its latency varies from day to day (`glm-5.3-flash` p50 933 ms one day, ~4.5 s the next). A fast-path AI check that is late, rate-limited or finds no free slot takes the full simulation, which is safe but slower. All model calls share 3 slots; checks go first, but a check can still wait for explanations that are already running.
 - The load test refuses to start with less than 2 GB free RAM and removes its own sandbox containers on Ctrl+C, SIGTERM or when its parent process ends; a hard kill is cleaned up by the next run.
 
 ## How to run
@@ -286,11 +321,11 @@ Needs Docker (Docker Desktop on Windows) and Python 3.12+.
 # 1. Build the sandbox image (Foundry v1.8.5, contracts compiled at build time)
 sandbox/build.sh                # Windows: .\sandbox\build.ps1
 
-# 2. Run every scenario (a-e) through the Guard: one table + circuit breaker state
+# 2. Run every scenario (a-g) through the Guard: one table + circuit breaker state
 scenarios/run.sh                # Windows: .\scenarios\run.ps1
 
 # 3. One scenario with the full report (diff, probe evidence, findings, timings, limits)
-scenarios/run.sh d_binance_7702 # Windows: .\scenarios\run.ps1 d_binance_7702
+scenarios/run.sh d_delegation_drain # Windows: .\scenarios\run.ps1 d_delegation_drain
 
 # Human reset of a latched freeze / pause (logged with who did it)
 backend/.venv/bin/python backend/cli.py reset --address 0x... --actor alice --db data/run.sqlite3
@@ -298,13 +333,13 @@ backend/.venv/bin/python backend/cli.py reset --address 0x... --actor alice --db
 
 | Scenario | Expected |
 |---|---|
-| (a) customer hot wallet, small withdrawal | ALLOW, fast path |
-| (b) treasury, allowlisted, above limit | NEEDS_HUMAN (R4) |
-| (c) treasury, unknown address, above limit | BLOCK (R5) |
-| (d) Binance-style: 5 EIP-7702 authorizations to a sweeper | BLOCK on the slow path (R1, R2, R3 from the probe), wallet paused |
-| (e) Mercado-style: one address, 5 chains, token by token | ALLOW, then DELAY (R7), then BLOCK (R7, R8) and the address is frozen; other customers still ALLOW; the report shows the blast radius (value allowed before the freeze) |
-| (f) honest large withdrawal (40% of the hot wallet) | NEEDS_HUMAN (R3 without sandbox evidence), wallet not paused, next customer ALLOW |
-| (g) coordinated attack on several wallets and chains | breaker level 1 → 2 → 3 → 4 (global stop), then an ops lead resets and service resumes |
+| (a) Everyday customer withdrawal: a new customer, then the same customer again | ALLOW after a full simulation (new destination), then ALLOW on the fast path (rules alone) |
+| (b) Treasury payout above the limit to its own cold storage | NEEDS_HUMAN (R4) |
+| (c) Treasury payout above the limit to an unknown address | BLOCK (R5) |
+| (d) Hot wallet delegation drain (EIP-7702): 5 authorizations to a sweeper | BLOCK on the slow path (R1, R2, R3 from the probe), wallet paused |
+| (e) Multi-chain drain after key theft: one address, 5 chains, token by token | ALLOW, then DELAY (R7), then BLOCK (R7, R8) and the address is frozen; other customers still ALLOW; the report shows the blast radius (value allowed before the freeze) |
+| (f) Honest large customer withdrawal (40% of the hot wallet) | NEEDS_HUMAN (R3 without sandbox evidence), wallet not paused, next customer ALLOW |
+| (g) Coordinated attack on several wallets and chains | breaker level 1 → 2 → 3 → 4 (global stop); an operator lifts it with the admin token |
 
 AI: copy `.env.example` to `.env` and set `VULTR_INFERENCE_API_KEY`. Without a key the
 AI is a local mock and every result is marked **[MOCK]**. With a key, a failure never
@@ -333,8 +368,9 @@ A security operations console for the people who run withdrawals: light theme, I
 monospace only for addresses, hashes and diffs. Pages:
 
 - **Overview**: request and verdict counts, attacks stopped, funds protected, customers affected,
-  live activity, the breaker, and the incident replays (Binance-style delegation, Mercado-style
-  multi-chain drain, honest large withdrawal, coordinated attack, and the everyday cases).
+  the risk level, live activity, the breaker, and the incident replays (hot wallet delegation
+  drain, multi-chain drain after key theft, honest large withdrawal, coordinated attack, and the
+  everyday cases). Each replay step has a plain label; the technical one is under "Technical detail".
 - **Signing requests**: every request with its verdict. The detail view starts with the verdict
   in plain words and the rule codes, then the check timeline, the sandbox evidence (state diff
   with the `0xef0100` delegation line highlighted, probe result), the signer outcome, and the AI
@@ -345,13 +381,15 @@ monospace only for addresses, hashes and diffs. Pages:
   **Simulation** (50 withdrawals + 1 attack, with a latency chart), **Policies** (the active rules
   and thresholds, read-only, from `GET /policies`).
 
-| Overview | Binance replay | Mercado blast radius |
-|---|---|---|
-| ![overview](docs/screenshots/desktop-1-overview.png) | ![binance](docs/screenshots/desktop-2-binance-detail.png) | ![mercado](docs/screenshots/desktop-3-mercado-blast-radius.png) |
+Screenshots with the real model (`glm-5.3-flash` checks, `glm-5.3` explanations):
 
-| Review queue | Containment | Simulation |
+| Overview, level 0 Normal | Replay at level 2 High | Level 4 Global stop |
 |---|---|---|
-| ![review](docs/screenshots/desktop-4-review-queue.png) | ![containment](docs/screenshots/desktop-5-containment.png) | ![simulation](docs/screenshots/desktop-6-simulation.png) |
+| ![overview](docs/screenshots/desktop-overview-level-0.png) | ![level 2](docs/screenshots/desktop-replay-level-2.png) | ![global stop](docs/screenshots/desktop-global-stop-level-4.png) |
+
+| Delegation drain detail | Review queue | Containment |
+|---|---|---|
+| ![delegation drain](docs/screenshots/desktop-delegation-drain-detail.png) | ![review](docs/screenshots/desktop-review-queue.png) | ![containment](docs/screenshots/desktop-containment.png) |
 
 Phone versions: `docs/screenshots/phone-*.png`.
 
@@ -368,7 +406,8 @@ npm run dev              # development: Vite on :5173, proxies the API on :8000
 
 The "Run isolation test" button is live only with `REDTEAM_PUBLIC=true`; otherwise the page shows the last
 saved report. Browser test (needs Docker, the built UI and `python -m playwright install chromium`):
-`cd backend && .venv/bin/python -m pytest -m ui` (add `FC_SCREENSHOTS=1` to refresh `docs/screenshots/`).
+`cd backend && .venv/bin/python -m pytest -m ui` (add `FC_SCREENSHOTS=1` to refresh `docs/screenshots/`,
+and `FC_LIVE_LLM=1` to use the real model from `.env`).
 
 ## API
 
@@ -379,7 +418,7 @@ cp .env.example .env            # set ADMIN_TOKEN; VULTR_INFERENCE_API_KEY optio
 cd backend
 .venv/bin/python -m uvicorn app.api:app --host 127.0.0.1 --port 8000
 # Windows: .venv\Scripts\python -m uvicorn app.api:app --host 127.0.0.1 --port 8000
-curl -X POST localhost:8000/scenarios/d_binance_7702/run      # one demo scenario
+curl -X POST localhost:8000/scenarios/d_delegation_drain/run      # one demo scenario
 curl -N localhost:8000/stream                                 # live events (SSE)
 ```
 
@@ -390,7 +429,8 @@ curl -N localhost:8000/stream                                 # live events (SSE
 | `GET /history?limit=50` | Past checks, newest first |
 | `GET /breaker` | Frozen destinations, paused wallets, breaker events |
 | `POST /breaker/reset` | `{"address": …}` or `{"wallet": …}`, header `X-Admin-Token` (401 without, 403 wrong) |
-| `GET /stream` | Server-Sent Events, one per step: received, decoded, request_rules, path, sandbox_started, sandbox_done, findings, verdict, approval, signer |
+| `POST /breaker/reset-all`, `POST /demo/{run_id}/breaker/reset-all` | Back to level 0: lift the global stop, end safe modes, unpause wallets, unfreeze destinations; each reset logged. `X-Admin-Token` required, also for a visitor's own replay |
+| `GET /stream` | Server-Sent Events, one per step: received, decoded, request_rules, path, sandbox_started, sandbox_done, findings, verdict, approval, signer, explanation; replays also send `breaker_state` (level 0-4) after each step |
 | `GET /events?after=` | The same events as JSON, to catch up |
 | `GET /scenarios`, `POST /scenarios/{name}/run` | Demo scenarios, run through `/withdraw`. Each run has its **own fresh state** and a `run_id` (one visitor never changes another's result); the DELAY worker is fast-forwarded at the end |
 | `GET /pending`, `POST /pending/{id}/approve`, `/reject` | NEEDS_HUMAN waits for a human (`X-Admin-Token`). Approve re-checks the rules first; a new freeze/pause/finding turns it into BLOCK. Logged with who and when |
@@ -440,6 +480,9 @@ We keep this log so you can see how the idea changed while we built it.
 | 3 Nov | Watchtower check W2: outflow without Guard approval = stolen key | Some Mercado keys were probably stolen; a co-signer cannot stop that, only detect it |
 | 3 Nov | Dropped "quarantine new address" | Every new customer would wait; the cost for customers is higher than the gain |
 | 3 Nov | Sandbox starting state comes from the Guard (StateProvider), never from the request | The withdrawal service is untrusted |
+| 5 Nov | Escalation policy: AI asked only for new destinations or large amounts, at most 3 at once | Asking the AI on every fast-path check caused 288 rate-limit errors (429) under load |
+| 6 Nov | New destinations go straight to full simulation; the AI is asked only about large amounts; one shared limit of 3 model calls, checks first | On a slow provider day no AI check answered within 2 s, so every new destination was simulated anyway; a simulation (~1–3 s) gives evidence, the AI only an opinion |
+| 6 Nov | Neutral attack-class names on the website, real names only in the README | The demo shows classes of attack, not claims about specific incidents |
 
 ## Sources
 
