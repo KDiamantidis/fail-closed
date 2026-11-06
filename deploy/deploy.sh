@@ -71,9 +71,10 @@ secrets() {
   cat <<EOF
 
 == YOUR TURN: type the secrets on the VM yourself
-Open YOUR OWN terminal (not the Claude Code prompt, not with "!"), then run:
+Open YOUR OWN terminal (PowerShell or Git Bash; not the Claude Code prompt, not with "!").
+ssh uses your key ~/.ssh/id_ed25519 by default. Run:
 
-  ssh -t -i $KEY $OPS@$IP "sudo -u failclosed nano /opt/fail-closed/app/.env"
+  ssh -t $OPS@$IP "sudo -u failclosed nano /opt/fail-closed/app/.env"
 
 In nano, fill in these two lines (everything else is already set):
 
@@ -81,7 +82,7 @@ In nano, fill in these two lines (everything else is already set):
   ADMIN_TOKEN=<a new random value>
 
   For ADMIN_TOKEN, in that same terminal you can first run:
-  ssh -i $KEY $OPS@$IP "openssl rand -hex 32"
+  ssh $OPS@$IP "openssl rand -hex 32"
   and paste the result. Keep the token somewhere safe: it lifts a real breaker level.
 
 Save with Ctrl+O, Enter, then Ctrl+X. Then tell Claude "secrets done".
