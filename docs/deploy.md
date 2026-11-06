@@ -121,28 +121,96 @@ anyone else; the only shared state is the Guard's own, and in public mode only t
 change it. The client IP for the limits is the last `X-Forwarded-For` entry, trusted only from
 127.0.0.1 (Caddy or the tunnel on the same host).
 
-## Plan B: no VM by Saturday (laptop + free HTTPS tunnel)
+## Plan B: no VM by Saturday 10:00 (laptop + Cloudflare tunnel)
 
-Steps only; **not started**. Uses a Cloudflare "quick tunnel": no account, a random
-`https://<words>.trycloudflare.com` address, HTTPS by Cloudflare. No ports are opened on the laptop.
+For the submission, if we use it:
 
-1. Laptop: plugged in, sleep off while the demo runs (Windows: Settings → Power → Never sleep).
-2. Docker Desktop running; sandbox image built (`sandbox\build.ps1`); web UI built
-   (`cd frontend; npm run build`).
-3. In `.env` (you edit it; secrets as today): `PUBLIC_DEMO=true`, `LLM_MODE=live`,
-   `LLM_DAILY_BUDGET_USD=1`, `LLM_BUDGET_FILE=data/llm_budget.json`, `REDTEAM_PUBLIC=false`,
-   `SANDBOX_MODE=warm`, and a **new** `ADMIN_TOKEN`.
-4. Check free RAM first (≥ 2 GB, as for the load test), then start the API on localhost only:
-   `cd backend; .venv\Scripts\python -m uvicorn app.api:app --host 127.0.0.1 --port 8000 --no-proxy-headers`
-5. Install the tunnel once: `winget install --id Cloudflare.cloudflared`.
-6. Start it: `cloudflared tunnel --url http://127.0.0.1:8000`. It prints the public HTTPS address.
-7. Add that address to `CORS_ORIGINS` in `.env` and restart the API (step 4).
-8. Check from a phone on mobile data: the page loads, replay (d) is blocked, `/check` gives 401.
-9. Stop: Ctrl+C in both windows. The address dies with the tunnel.
+> The Vultr VM was blocked by account review before the deadline, so the demo runs on the
+> laptop; the AI still runs on Vultr Serverless Inference.
 
-Limits of plan B: the address changes every time the tunnel restarts; the laptop must stay on;
-Docker Desktop on Windows is not the rootless setup (say so in the README if we use it); a quick
-tunnel has no uptime guarantee (a free named tunnel needs a Cloudflare account and a domain).
+### 1. Start the app on the laptop (local only)
+
+`deploy/planb.ps1` runs the app like the VM does: `PUBLIC_DEMO=true`, the same per-IP limits
+(10 replays a minute, 2 simulations per 10 minutes, 30 demo actions a minute), a $1/day AI budget
+kept in `data/planb/llm_budget.json`, the AI on Vultr Serverless Inference (`LLM_MODE=live`: no
+key means AI off, never the mock), the warm sandbox pool. No Caddy: the tunnel gives HTTPS. The
+API listens on 127.0.0.1:8000 only. Secrets stay in the local `.env`; the script only checks
+that they are set and never prints them.
+
+```powershell
+.\deploy\planb.ps1 start     # checks free RAM (>= 2 GB), Docker, the image, the built UI, the secrets
+.\deploy\planb.ps1 status    # API, Plan B sandbox count, free RAM, today's AI spend
+.\deploy\planb.ps1 stop      # stops the API and removes every Plan B sandbox container
+```
+
+Before the first `start`, set `ADMIN_TOKEN` yourself (the script refuses to start without it):
+`backend\.venv\Scripts\python -c "import secrets; print(secrets.token_hex(32))"`, then
+`notepad .env` and paste it into the `ADMIN_TOKEN=` line. (`start -Rehearsal` runs without it,
+with every admin action disabled: for local tests only.)
+
+Rehearsal on 2026-11-06, this laptop (Windows 11, 16 CPUs, Docker Desktop), `start -Rehearsal`:
+replay (d) blocked in 2.9 s, nothing signed, explanation by `glm-5.3`; replay (g) reached the
+global stop in 14.2 s; Reset demo back to level 0; `stop` removed all 4 sandboxes, none left; AI
+spend $0.004; the key in no log file. Free RAM went from 3.9 GB down to 1.1 GB at the lowest
+(API + 4 warm sandboxes + the test browser): close other programs before the demo.
+
+### 2. Install cloudflared (once, by hand)
+
+```powershell
+winget install --id Cloudflare.cloudflared
+cloudflared --version            # open a new terminal first if it is not found
+```
+
+(Or download `cloudflared-windows-amd64.msi` from github.com/cloudflare/cloudflared/releases.)
+
+### 3a. Quick tunnel: no account, no domain
+
+```powershell
+cloudflared tunnel --url http://127.0.0.1:8000
+```
+
+It prints a public `https://<random-words>.trycloudflare.com` address. Limits, from Cloudflare's
+documentation (developers.cloudflare.com, "Quick Tunnels"):
+- **No Server-Sent Events.** Our UI gets the live replay steps (the rising risk colour) and the
+  AI explanations over SSE. Through a quick tunnel, replays still finish and show their verdicts,
+  but the live steps and the explanation cards would not arrive. Test it before sharing the link.
+- At most 200 requests in flight at once (more get 429).
+- **The address changes every time** cloudflared starts, and stops working when it stops.
+- **The laptop must stay on and awake**, with Docker Desktop running (Settings → Power: never sleep).
+
+### 3b. Named tunnel: a stable address, SSE works
+
+Needs a free Cloudflare account and **a domain whose DNS is on Cloudflare** (nameservers pointed
+to Cloudflare). Then, once:
+
+```powershell
+cloudflared tunnel login                                   # opens the browser, pick the domain
+cloudflared tunnel create fail-closed
+cloudflared tunnel route dns fail-closed demo.<your-domain>
+```
+
+and a `%USERPROFILE%\.cloudflared\config.yml`:
+
+```yaml
+tunnel: fail-closed
+credentials-file: C:\Users\<you>\.cloudflared\<tunnel-id>.json
+ingress:
+  - hostname: demo.<your-domain>
+    service: http://127.0.0.1:8000
+  - service: http_status:404
+```
+
+Run it with `cloudflared tunnel run fail-closed`. The address stays the same across restarts.
+The laptop must still stay on and awake.
+
+### 4. Before sharing the link
+
+- From a phone on mobile data: the page loads, replay (d) is blocked, `POST /check` answers 401.
+- The rate limits see the visitor's address: the API trusts `X-Forwarded-For` only from
+  127.0.0.1, which is where cloudflared connects from. Run 11 replays in a minute from one phone:
+  the 11th must get "Too many replays".
+- `.\deploy\planb.ps1 status` every so often: sandbox count, free RAM, AI spend.
+- Afterwards: Ctrl+C in the cloudflared window, then `.\deploy\planb.ps1 stop`.
 
 ## What I need from you on deploy day
 
