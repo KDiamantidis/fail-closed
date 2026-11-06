@@ -93,7 +93,7 @@ risk strip while it changes colour.
 
 > We measured five hundred normal withdrawals and one hidden attack on a laptop.
 > The attack was stopped. Zero normal customers were refused.
-> Plain payouts take about three milliseconds. A full sandbox check takes about one to two seconds.
+> Plain payouts take about three milliseconds. A full sandbox check takes about one to three seconds.
 
 ## 4:05 – 4:25 · Where it fits (slide 6)
 

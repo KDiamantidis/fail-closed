@@ -323,8 +323,8 @@ The API (`backend/app/api.py`): `POST /check` (dry run, never an approval), `POS
 
 | Suite | Count | Where |
 |---|---|---|
-| Unit and API tests, Python 3.12 | 566 passed, 25 skipped (the Docker ones) | `python:3.12-slim` container, 2026-11-06 |
-| Real sandbox + browser tests | 25 passed | laptop, Docker Desktop, Chromium (Playwright), 2026-11-06 |
+| Unit and API tests, Python 3.12 | 575 passed, 28 skipped (the Docker ones) | `python:3.12-slim` container, 2026-11-06 |
+| Real sandbox + browser tests | 28 passed, 0 containers left | laptop, Docker Desktop, Chromium (Playwright), 2026-11-06 |
 
 ```sh
 # Python 3.12, no Docker needed inside
