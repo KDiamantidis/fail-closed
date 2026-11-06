@@ -71,8 +71,8 @@ alone ("Known destination, small amount: AI check not needed"). Every slow-path 
 an AI explanation afterwards.
 
 **One shared limit for the model.** At most 3 Vultr calls run at once (`LLM_CONCURRENCY`), fast-path
-checks and explanations together. A waiting fast-path check always goes before a waiting
-explanation; explanations wait in line. A check that finds no free slot within the 2 s budget, or
+checks and explanations together. Explanations use at most 2 of the 3, so one slot is always free
+for a check, and a waiting check goes before a waiting explanation. A check that finds no free slot within the 2 s budget, or
 whose AI call times out, errors or is rate-limited (429), goes to full simulation, never to a fast
 ALLOW. The explanation card is written in the background by a bigger model (`glm-5.3`, 20 s
 timeout, falls back to `glm-5.3-flash`); it never holds up a verdict.
@@ -311,6 +311,8 @@ must never share a thread pool with the fast-path AI check.
 - The AI explanation is untrusted output too: it is length-limited plain text, made after the verdict, and never read by the rules. The untrusted request data is sent to the model inside one marked block it is told never to obey.
 - Measured numbers so far come from a laptop (mock and real model), not yet from the Vultr VM (see Results).
 - The Vultr inference endpoint rate-limits bursts (429) and its latency varies from day to day (`glm-5.3-flash` p50 933 ms one day, ~4.5 s the next). A fast-path AI check that is late, rate-limited or finds no free slot takes the full simulation, which is safe but slower. All model calls share 3 slots; checks go first, but a check can still wait for explanations that are already running.
+- On the VM, sandboxes run on a rootless Docker daemon of the API user (cgroup v2 delegation, so the limits hold). If the red team is not 7/7 contained there, the allowed fallback is the normal Docker daemon with the API user in the `docker` group, which is root-equivalent; if the demo runs that way, this line will say so. Plan B (a laptop with a tunnel) uses Docker Desktop, not rootless.
+- Public demo: per-IP rate limits and the daily model budget live in one API process, in memory (the budget also in a file). Behind a proxy they trust `X-Forwarded-For` only from 127.0.0.1. Up to 3 model calls already running may finish after the budget is reached.
 - The load test refuses to start with less than 2 GB free RAM and removes its own sandbox containers on Ctrl+C, SIGTERM or when its parent process ends; a hard kill is cleaned up by the next run.
 
 ## How to run
@@ -394,7 +396,16 @@ Screenshots with the real model (`glm-5.3-flash` checks, `glm-5.3` explanations)
 Phone versions: `docs/screenshots/phone-*.png`.
 
 Every scenario, load demo and approval runs on its own isolated state, so one visitor never
-changes another visitor's result. The page holds no secrets, and all text from requests, tokens
+changes another visitor's result.
+
+**Public demo mode** (`PUBLIC_DEMO=true`, used on the VM): visitors run replays, the simulation
+and the review-queue demo, and read policies and containment. "Reset demo" puts their own demo
+back to level 0, and it resets on its own after 10 minutes without activity. Raw `/check` and
+`/withdraw`, lifting a real breaker level and the Guard's own queue need the admin token.
+Per-IP limits (10 replays a minute, 2 simulations per 10 minutes) answer with a plain message,
+and a daily model budget ($1) pauses AI explanations with "Demo budget reached: AI explanations
+paused until tomorrow"; decisions keep working without the AI, never with the mock. Deploy:
+`docs/deploy.md`. The page holds no secrets, and all text from requests, tokens
 or the AI is shown as plain text.
 
 ```sh
@@ -424,8 +435,8 @@ curl -N localhost:8000/stream                                 # live events (SSE
 
 | Endpoint | What |
 |---|---|
-| `POST /check` | Dry run: verdict, findings, path + reasons, timings, AI result. **Never** an approval (only `/withdraw` can lead to a signature). Bad input or missing `wallet_type`: 422 |
-| `POST /withdraw` | Demo flow: withdrawal service → Guard → approval → mock signer; returns signed or refused with the reason |
+| `POST /check` | (Public demo: admin token.) Dry run: verdict, findings, path + reasons, timings, AI result. **Never** an approval (only `/withdraw` can lead to a signature). Bad input or missing `wallet_type`: 422 |
+| `POST /withdraw` | (Public demo: admin token.) Demo flow: withdrawal service → Guard → approval → mock signer; returns signed or refused with the reason |
 | `GET /history?limit=50` | Past checks, newest first |
 | `GET /breaker` | Frozen destinations, paused wallets, breaker events |
 | `POST /breaker/reset` | `{"address": …}` or `{"wallet": …}`, header `X-Admin-Token` (401 without, 403 wrong) |
@@ -438,7 +449,8 @@ curl -N localhost:8000/stream                                 # live events (SSE
 | `POST /redteam/run`, `GET /redteam/last` | Containment check (SSE, one event per payload); admin unless `REDTEAM_PUBLIC=true` |
 | `GET /status` | For the UI header: sandbox mode, LLM REAL/MOCK, breaker level 0-4 |
 | `GET /policies` | Read-only: the active rules, breaker levels and thresholds in plain words (Policies page) |
-| `GET /demo/{run_id}/pending`, `POST /demo/{run_id}/pending/{id}/approve\|reject` | Human approval inside your own demo run (kept 30 min); never the main state |
+| `GET /demo/{run_id}/pending`, `POST /demo/{run_id}/pending/{id}/approve\|reject` | Human approval inside your own demo run (kept 30 min; public demo: 10 idle minutes); never the main state |
+| `POST /demo/reset` | `{"run_ids": [...]}`: "Reset demo", drops your own demo runs (breaker, queue, history), back to level 0 |
 | `GET /guard/public-key`, `GET /health` | The Guard's ed25519 public key; status |
 
 At most `SANDBOX_MAX_CONCURRENT` (4) sandboxes run at once; a check waits up to

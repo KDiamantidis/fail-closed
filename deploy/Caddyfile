@@ -1,0 +1,23 @@
+# HTTPS for the public demo. No certificate email (as decided). The domain comes from
+# /opt/caddy/.env (DOMAIN=<ip>.sslip.io).
+{$DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		X-Frame-Options DENY
+		Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'"
+		-Server
+	}
+	request_body {
+		max_size 64KB
+	}
+	reverse_proxy 127.0.0.1:8000 {
+		flush_interval -1
+	}
+	log {
+		output stdout
+		format console
+	}
+}
