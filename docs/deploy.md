@@ -2,7 +2,7 @@
 
 Target: **Ubuntu 24.04, 2 vCPU / 4 GB, Stockholm**, SSH key login, user `root` at first.
 Domain: **`<ip>.sslip.io`** (resolves to the VM, free, real certificate; no certificate email).
-Release: git tag **`v1.0-hackathon`**.
+Release: git tag **`v1.1-hackathon`** (`v1.0-hackathon` is the earlier one, kept).
 
 Everything runs from this laptop with `deploy/deploy.sh` over SSH (key `~/.ssh/id_ed25519`).
 The scripts in `deploy/remote/` run on the VM. **Secrets never pass through the scripts or
@@ -40,7 +40,7 @@ Internet ──443/80──► Caddy (Docker Compose, system Docker, host networ
 |---|---|---|
 | 1 | you | Tell Claude the VM's IPv4 address. |
 | 2 | Claude | `deploy/deploy.sh <IP> bootstrap`: user `ops` with your key, firewall, swap, Docker; then root and password login off (checked: `ops` works first, root is refused after). |
-| 3 | Claude | `deploy/deploy.sh <IP> install`: user `failclosed`, rootless Docker, code at `v1.0-hackathon`, sandbox image, web UI, `.env` with both secrets **empty**, systemd unit, Caddy files. About 10 minutes. |
+| 3 | Claude | `deploy/deploy.sh <IP> install`: user `failclosed`, rootless Docker, code at `v1.1-hackathon`, sandbox image, web UI, `.env` with both secrets **empty**, systemd unit, Caddy files. About 10 minutes. |
 | 4 | Claude | `deploy/deploy.sh <IP> secrets`: prints the exact command for you. |
 | 5 | **you** | In **your own terminal** (not the Claude Code prompt, not with `!`, so nothing reaches the chat): `ssh -t ops@<IP> "sudo -u failclosed nano /opt/fail-closed/app/.env"`. Fill in `VULTR_INFERENCE_API_KEY=` and `ADMIN_TOKEN=` (make one with `ssh ops@<IP> "openssl rand -hex 32"`). Save: Ctrl+O, Enter, Ctrl+X. Keep the token safe. Tell Claude "secrets done". |
 | 6 | Claude | `deploy/deploy.sh <IP> finish`: checks both lines are filled (prints only "set" / "MISSING"), starts the API and Caddy, waits for the certificate. |
@@ -56,8 +56,8 @@ to compare it, the Vultr console shows the VM's SSH host key fingerprints after 
 ## Update
 
 ```sh
-git tag v1.0.1-hackathon && git push origin v1.0.1-hackathon     # on the laptop
-deploy/deploy.sh <IP> release v1.0.1-hackathon
+git tag v1.2-hackathon && git push origin v1.2-hackathon     # on the laptop
+deploy/deploy.sh <IP> release v1.2-hackathon
 ```
 
 `release` (`deploy/remote/release.sh`) on the VM:
