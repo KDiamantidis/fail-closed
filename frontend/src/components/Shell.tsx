@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useStore } from "../lib/store";
-import { GlobalStopBanner, RiskDot, RiskStrip } from "./Risk";
+import { DemoNotice, GlobalStopBanner, RiskDot, RiskStrip } from "./Risk";
 import { Pill } from "./ui";
 
 const ICONS: Record<string, ReactNode> = {
@@ -61,7 +61,8 @@ export function Shell({ children }: { children: ReactNode }) {
             <span className="hidden flex-wrap gap-1.5 md:flex">
               <Pill testid="pill-sandbox">Sandbox: {status ? (status.sandbox_mode === "warm" ? "Warm pool" : "Fresh") : "…"}</Pill>
               <Pill tone={status?.llm === "REAL" ? "ok" : "held"} testid="pill-ai">
-                AI analysis: {status ? (status.llm === "REAL" ? status.model : status.llm === "MOCK" ? "Mock" : "Off") : "…"}
+                AI analysis: {status ? (status.llm_budget?.reached && status.llm === "REAL" ? "paused (daily budget)"
+                  : status.llm === "REAL" ? status.model : status.llm === "MOCK" ? "Mock" : "Off") : "…"}
               </Pill>
             </span>
           </div>
@@ -102,7 +103,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </aside>
         </div>
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-          <div className="mx-auto max-w-[1180px]"><GlobalStopBanner />{children}</div>
+          <div className="mx-auto max-w-[1180px]"><DemoNotice /><GlobalStopBanner />{children}</div>
           <footer className="mx-auto mt-12 flex max-w-[1180px] flex-wrap items-center justify-between gap-3 border-t border-border pt-5 text-[13px] text-muted">
             <span>Fail Closed · No approval, no signature.</span>
             <span className="flex gap-4">

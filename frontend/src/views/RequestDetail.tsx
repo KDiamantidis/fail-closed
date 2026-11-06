@@ -260,7 +260,8 @@ export function RequestDetail({ row }: { row: Row }) {
               AI explains, it never decides. The verdict above comes from fixed rules.
             </p>
             {!ai && <p className="text-[13px] text-muted">Analysis in progress. It arrives after the verdict.</p>}
-            {ai && !ai.available && <p className="text-[13px] text-muted">AI analysis is unavailable. The verdict is the same.</p>}
+            {ai && !ai.available && <p className="text-[13px] text-muted" data-testid="ai-unavailable">
+              {ai.budget ? `${ai.reason}. The verdict is the same.` : "AI analysis is unavailable. The verdict is the same."}</p>}
             {ai?.available !== false && ai && (
               <>
                 <p className="label">Risk score</p>

@@ -58,6 +58,18 @@ class Settings(BaseSettings):
     # One shared limit for ALL Vultr calls (fast-path checks and explanations). Fast-path checks
     # go first; explanations wait in line. A fast check with no slot within its budget -> full simulation.
     llm_concurrency: int = 3
+    # Daily model spend cap (USD, UTC day; <= 0 = none). Reached: the AI check counts as
+    # unavailable (full simulation) and explanations pause; never the mock instead.
+    llm_daily_budget_usd: float = 1.0
+    llm_budget_file: str = ""  # keeps today's spend across restarts ("" = in memory)
+
+    # Public demo (the VM): raw /check and /withdraw need the admin token, per-IP rate limits,
+    # visitors' demo runs are dropped after this many idle minutes (or by "Reset demo").
+    public_demo: bool = False
+    demo_idle_reset_minutes: float = 10.0
+    rate_replays_per_minute: int = 10
+    rate_simulations_per_10_minutes: int = 2
+    rate_demo_actions_per_minute: int = 30
 
     # Sandbox: fresh container per check, always destroyed.
     sandbox_image: str = "fail-closed-sandbox:foundry-v1.8.5"

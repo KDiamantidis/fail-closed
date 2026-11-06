@@ -1,7 +1,7 @@
 import { ActivityFeed } from "../components/ActivityFeed";
 import { BlastRadius } from "../components/BlastRadius";
 import { BreakerLadder } from "../components/BreakerLadder";
-import { RiskKpi } from "../components/Risk";
+import { ResetDemoButton, RiskKpi } from "../components/Risk";
 import { Card, PageHeader, Pill, Spinner, VerdictPill } from "../components/ui";
 import { eth } from "../lib/api";
 import { REPLAYS } from "../lib/copy";
@@ -21,7 +21,8 @@ function Kpi({ label, value, note, tone = "text-ink", testid }:
 function outcome(run: Run | undefined) {
   if (!run) return null;
   if (run.status === "running") return <span className="flex items-center gap-1.5 text-[12px] text-muted"><Spinner /> Running…</span>;
-  if (run.status === "error") return <span className="text-[12px] text-bad">Failed: {run.error}</span>;
+  if (run.status === "error") return <span className="text-[12px] text-bad" role="alert">
+    {/^Too many/.test(run.error ?? "") ? run.error : `Failed: ${run.error}`}</span>;
   const checks = (run.result?.results ?? []).filter((x: any) => x.check);
   const counts: Record<string, number> = {};
   for (const x of checks) counts[x.check.verdict] = (counts[x.check.verdict] ?? 0) + 1;
@@ -78,7 +79,10 @@ export function Overview() {
       <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_380px]">
         <div className="space-y-6">
           <Card title="Incident replays" testid="replays"
-            action={<span className="hidden text-[12px] text-muted sm:block">Each replay runs on its own isolated state</span>}>
+            action={<span className="flex items-center gap-3">
+              <span className="hidden text-[12px] text-muted md:block">Each replay runs on its own isolated state</span>
+              <ResetDemoButton className="btn btn-secondary px-2.5 py-1.5" />
+            </span>}>
             <div className="-mt-1 mb-2 space-y-1 rounded-lg bg-subtle px-3 py-2.5 text-[13px]">
               <p><span className="font-medium text-ink">Delegation drain.</span> One signed transaction hands a hot wallet to an attacker's contract (EIP-7702), which can then empty it.</p>
               <p><span className="font-medium text-ink">Multi-chain drain.</span> With a stolen key, plain transfers send everything to one address on many chains, token by token.</p>

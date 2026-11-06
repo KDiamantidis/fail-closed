@@ -47,6 +47,9 @@ export interface Status {
   breaker_level: number;
   redteam_public: boolean;
   delay_minutes: number;
+  public_demo?: boolean;
+  demo_idle_reset_minutes?: number;
+  llm_budget?: { limit_usd: number; spent_today_usd: number; reached: boolean } | null;
 }
 
 /** The risk level the whole UI shows: the latest replay's breaker (live while it runs), or
@@ -62,6 +65,8 @@ interface Store {
   status: Status | null;
   risk: Risk;
   liftBreaker: (adminToken: string) => Promise<string | null>;  // null = done, else the error
+  resetDemo: (why?: "button" | "idle") => Promise<void>;
+  notice: string | null;
   scenarios: ScenarioInfo[];
   runs: Run[];
   rows: Row[];
@@ -102,6 +107,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [sim, setSim] = useState<SimState>({ status: "idle", rows: [] });
   const [route, go] = useHashRoute();
   const closers = useRef<(() => void)[]>([]);
+  const lastActivity = useRef(Date.now());
+  const [notice, setNotice] = useState<string | null>(null);
+  const touch = () => { lastActivity.current = Date.now(); setNotice(null); };
 
   useEffect(() => {
     const load = () => {
@@ -120,6 +128,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const running = runs.some((r) => r.status === "running");
 
   const runReplay = useCallback(async (name: string) => {
+    touch();
     const sc = scenarios.find((s) => s.name === name);
     if (!sc) return null;
     const runId = newRunId();
@@ -140,6 +149,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [scenarios, patch]);
 
   const runSim = useCallback(async () => {
+    touch();
     setSim({ status: "running", rows: [] });
     try {
       await postStream("/loadtest/run?normal=50", (type, data) => {
@@ -154,6 +164,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const decide = useCallback(async (runId: string, holdId: string, decision: "approve" | "reject") => {
+    touch();
     let r: any;
     try {
       r = await postJSON(`/demo/${runId}/pending/${encodeURIComponent(holdId)}/${decision}`);
@@ -201,9 +212,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [risk.runId, patch]);
 
-  const value = useMemo<Store>(() => ({ status, risk, liftBreaker, scenarios, runs, rows, sim, running, runReplay,
-    runSim, decide, route, go }),
-    [status, risk, liftBreaker, scenarios, runs, rows, sim, running, runReplay, runSim, decide, route, go]);
+  /** "Reset demo": this visitor's demo data (breaker, queue, history) back to level 0. The
+   * Guard's own state is untouched; lifting a real level stays the admin action. */
+  const resetDemo = useCallback(async (why: "button" | "idle" = "button") => {
+    const ids = runs.map((r) => r.runId);
+    closers.current.forEach((c) => c());
+    closers.current = [];
+    setRuns([]);
+    setSim({ status: "idle", rows: [] });
+    lastActivity.current = Date.now();
+    setNotice(why === "idle"
+      ? `Demo reset to level 0 after ${status?.demo_idle_reset_minutes ?? 10} minutes without activity.`
+      : "Demo reset: everything is back to level 0 (Normal).");
+    if (ids.length) {
+      try { await postJSON("/demo/reset", { run_ids: ids }); } catch { /* the server drops idle runs anyway */ }
+    }
+  }, [runs, status]);
+
+  // Public demo: after N minutes with no activity, reset on its own (the server drops the runs too).
+  useEffect(() => {
+    if (!status?.public_demo) return;
+    const limitMs = (status.demo_idle_reset_minutes ?? 10) * 60_000;
+    const t = window.setInterval(() => {
+      if (runs.length && !running && Date.now() - lastActivity.current > limitMs) resetDemo("idle");
+    }, 15_000);
+    return () => window.clearInterval(t);
+  }, [status, runs.length, running, resetDemo]);
+
+  const value = useMemo<Store>(() => ({ status, risk, liftBreaker, resetDemo, notice, scenarios, runs, rows, sim,
+    running, runReplay, runSim, decide, route, go }),
+    [status, risk, liftBreaker, resetDemo, notice, scenarios, runs, rows, sim, running, runReplay, runSim, decide,
+      route, go]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

@@ -66,8 +66,27 @@ export function RiskKpi() {
 
 /** Level 4 only: the deep red banner, with the admin action that lifts it. The admin token is
  * typed by an operator, sent once in a header, and never stored. */
+/** Public "Reset demo": this visitor's demo back to level 0. Not the real lift. */
+export function ResetDemoButton({ className = "btn btn-secondary", label = "Reset demo" }:
+  { className?: string; label?: string }) {
+  const { resetDemo, runs, running } = useStore();
+  return (
+    <button type="button" className={className} data-testid="reset-demo" disabled={!runs.length || running}
+      onClick={() => resetDemo("button")}>
+      {label}
+    </button>
+  );
+}
+
+export function DemoNotice() {
+  const { notice } = useStore();
+  if (!notice) return null;
+  return <p role="status" data-testid="demo-notice"
+    className="mb-4 rounded-lg border border-border bg-surface px-4 py-2.5 text-[13px] text-body">{notice}</p>;
+}
+
 export function GlobalStopBanner() {
-  const { risk, liftBreaker } = useStore();
+  const { risk, liftBreaker, status } = useStore();
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,6 +113,15 @@ export function GlobalStopBanner() {
             Two independent attack signals stopped every approval{risk.source ? " in this replay" : ""}. After a
             review, an operator lifts it: every level returns to 0 (Normal) and each reset is logged.
           </p>
+          {risk.source && (
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+              <ResetDemoButton className="btn border-white/80 bg-transparent text-white" />
+              <span className="text-[12.5px]">
+                {status?.public_demo ? "Public demo: anyone can reset their own demo. " : ""}
+                The real lift below needs the admin token.
+              </span>
+            </div>
+          )}
           <form className="mt-3 flex flex-wrap items-end gap-2" onSubmit={submit}>
             <label className="flex min-w-0 flex-col gap-1 text-[12px] font-medium">
               Admin token

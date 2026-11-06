@@ -262,6 +262,19 @@ def test_ui_console(server, browser, viewport):
     assert page.locator('[data-testid="global-stop-banner"]').count() == 0
     assert kpi.get_attribute("data-level") == "0"
 
+    # "Reset demo" (public, no token): the visitor's own demo back to level 0
+    page.click('[data-testid="replay-d_delegation_drain"]')
+    page.locator('[data-testid="replay-outcome-d_delegation_drain"]').wait_for(timeout=120_000)
+    assert_level(page, 2, "High")
+    page.click('[data-testid="reset-demo"]')
+    assert_level(page, 0, "Normal")
+    assert page.locator('[data-testid="demo-notice"]').inner_text().startswith("Demo reset")
+    assert page.locator('[data-testid="reset-demo"]').is_disabled()  # nothing left to reset
+    # the replays again, so the KPIs below have numbers (the reset cleared them)
+    for name in ("a_customer_small_withdrawal", "e_multichain_drain", "f_honest_large_withdrawal"):
+        page.click(f'[data-testid="replay-{name}"]')
+        page.locator(f'[data-testid="replay-outcome-{name}"]').wait_for(timeout=120_000)
+
     # Overview with the numbers filled in
     assert int(page.locator('[data-testid="kpi-checked"] p').nth(1).inner_text()) >= 22
     assert page.locator('[data-testid="kpi-attacks"] p').nth(1).inner_text() != "0"

@@ -17,6 +17,7 @@ No response ever contains a secret: no settings, no API keys, no private keys.
 """
 
 import asyncio
+from collections import deque
 import json
 import re
 from collections import OrderedDict
@@ -34,7 +35,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from app.config import REPO_ROOT, Settings, get_settings
 from app.models import TxRequest
@@ -61,6 +62,10 @@ class DecisionRequest(BaseModel):
     actor: str = "api-admin"  # who decides; written to the log
 
 
+class DemoReset(BaseModel):
+    run_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
 class ResetRequest(BaseModel):
     address: str | None = None  # level 1: unfreeze a destination
     wallet: str | None = None  # level 2: unpause a wallet
@@ -79,6 +84,49 @@ class ResetRequest(BaseModel):
 
 DEMO_RUN_TTL_SECONDS = 30 * 60
 DEMO_RUN_MAX = 50
+TRUSTED_PROXIES = ("127.0.0.1", "::1")  # Caddy / the tunnel on the same host
+
+
+class RateLimiter:
+    """Per-IP sliding windows (public demo). In memory: one API process (one uvicorn worker)."""
+
+    def __init__(self, clock=time.monotonic):
+        self.clock = clock
+        self._hits: dict[tuple[str, str], deque] = {}
+        self._lock = threading.Lock()
+
+    def hit(self, what: str, ip: str, limit: int, window: float, words: str) -> None:
+        """Count one request; over the limit -> 429 with a plain message (and Retry-After)."""
+        if limit <= 0:
+            return
+        now = self.clock()
+        with self._lock:
+            q = self._hits.setdefault((what, ip), deque())
+            while q and q[0] <= now - window:
+                q.popleft()
+            if len(q) >= limit:
+                wait = max(1, int(q[0] + window - now) + 1)
+                raise HTTPException(status_code=429, headers={"Retry-After": str(wait)},
+                                    detail=f"Too many {words} from your address: at most {limit} per "
+                                           f"{_window_words(window)}. Please try again in {wait} s.")
+            q.append(now)
+            if len(self._hits) > 10_000:  # bounded memory: forget idle addresses
+                for key in [k for k, v in self._hits.items() if not v or v[-1] <= now - 3600]:
+                    del self._hits[key]
+
+
+def _window_words(seconds: float) -> str:
+    return "minute" if seconds == 60 else f"{seconds / 60:g} minutes"
+
+
+def client_ip(request: Request) -> str:
+    """The visitor's address. Behind our own proxy (Caddy or the tunnel on this host) it is the
+    last X-Forwarded-For entry, the one the proxy added; otherwise the socket peer."""
+    peer = request.client.host if request.client else "unknown"
+    fwd = request.headers.get("x-forwarded-for", "")
+    if peer in TRUSTED_PROXIES and fwd:
+        return fwd.split(",")[-1].strip() or peer
+    return peer
 RUN_ID = re.compile(r"^[a-z0-9]{8,32}$")
 FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
 
@@ -132,21 +180,36 @@ class Services:
         self.demo_runs: "OrderedDict[str, tuple[Services, float]]" = OrderedDict()
         self.demo_lock = threading.Lock()
 
+    def demo_ttl(self) -> float:
+        """Public demo: a visitor's run is dropped after N idle minutes (auto-reset)."""
+        if self.settings.public_demo:
+            return self.settings.demo_idle_reset_minutes * 60
+        return DEMO_RUN_TTL_SECONDS
+
     def remember_demo(self, run_id: str, iso: "Services") -> None:
         with self.demo_lock:
             now = time.time()
             for rid in [r for r, (_, exp) in self.demo_runs.items() if exp < now]:
                 del self.demo_runs[rid]
-            self.demo_runs[run_id] = (iso, now + DEMO_RUN_TTL_SECONDS)
+            self.demo_runs[run_id] = (iso, now + self.demo_ttl())
             while len(self.demo_runs) > DEMO_RUN_MAX:
                 self.demo_runs.popitem(last=False)
 
     def demo(self, run_id: str) -> "Services":
         with self.demo_lock:
             entry = self.demo_runs.get(run_id)
-        if entry is None or entry[1] < time.time():
-            raise HTTPException(status_code=404, detail="demo run not found or expired; run the scenario again")
+            now = time.time()
+            if entry is None or entry[1] < now:
+                self.demo_runs.pop(run_id, None)
+                raise HTTPException(status_code=404, detail=(
+                    "This demo was reset (no activity for a while, or Reset demo). Run the replay again."))
+            self.demo_runs[run_id] = (entry[0], now + self.demo_ttl())  # activity keeps it alive
         return entry[0]
+
+    def forget_demos(self, run_ids: list[str]) -> int:
+        """Reset demo: drop these runs with their breaker, queue and history (level 0 again)."""
+        with self.demo_lock:
+            return sum(1 for rid in run_ids if self.demo_runs.pop(rid, None) is not None)
 
     def make_redteam(self, probe) -> RedTeam:
         return RedTeam(self.settings, health_probe=probe, gate=self.guard.gate)
@@ -234,6 +297,18 @@ def create_app(services: Services | None = None) -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=svc.settings.cors_origins, allow_methods=["GET", "POST"],
                        allow_headers=["Content-Type", "X-Admin-Token"], allow_credentials=False)
 
+    limiter = RateLimiter()
+    app.state.limiter = limiter
+
+    def limit(request: Request, what: str, n: int, window: float, words: str) -> None:
+        if svc.settings.public_demo:
+            limiter.hit(what, client_ip(request), n, window, words)
+
+    def admin_in_public_demo(token: str | None) -> None:
+        """Public demo: the raw API on the Guard's own state is for the operator only."""
+        if svc.settings.public_demo:
+            require_admin(token)
+
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok", "llm_mode": svc.guard.explainer.mode, "model": svc.settings.vultr_model,
@@ -247,7 +322,11 @@ def create_app(services: Services | None = None) -> FastAPI:
                 else "REAL" if svc.guard.explainer.mode == "live" else "OFF", "model": svc.settings.vultr_model,
                 "breaker_level": level, "redteam_public": svc.settings.redteam_public,
                 "fast_path_llm_escalation": svc.settings.fast_path_llm_escalation,
-                "delay_minutes": svc.settings.delay_minutes}
+                "delay_minutes": svc.settings.delay_minutes,
+                "public_demo": svc.settings.public_demo,
+                "demo_idle_reset_minutes": svc.settings.demo_idle_reset_minutes,
+                "llm_budget": getattr(svc.guard.explainer, "budget", None).snapshot()
+                if getattr(svc.guard.explainer, "budget", None) is not None else None}
 
     @app.get("/policies")
     def policies() -> dict:
@@ -296,15 +375,17 @@ def create_app(services: Services | None = None) -> FastAPI:
         return {"algorithm": "ed25519", "public_key": svc.approver.public_key_hex, "key_id": svc.approver.key.key_id}
 
     @app.post("/check")
-    def check(tx: TxRequest) -> dict:
+    def check(tx: TxRequest, x_admin_token: str | None = Header(default=None)) -> dict:
         """Dry run: the verdict and why. NEVER an approval (approvals only via /withdraw)."""
+        admin_in_public_demo(x_admin_token)
         try:
             return {**check_payload(svc.guard.check(tx)), "dry_run": True}
         except GuardBusy as e:
             raise HTTPException(status_code=503, detail=f"Guard busy: {e}")
 
     @app.post("/withdraw")
-    def withdraw(tx: TxRequest) -> dict:
+    def withdraw(tx: TxRequest, x_admin_token: str | None = Header(default=None)) -> dict:
+        admin_in_public_demo(x_admin_token)
         try:
             return svc.withdraw(tx)
         except GuardBusy as e:
@@ -396,7 +477,8 @@ def create_app(services: Services | None = None) -> FastAPI:
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     @app.post("/loadtest/run")
-    async def loadtest_run(normal: int = Query(50, ge=10, le=100), seed: int = Query(7)):
+    async def loadtest_run(request: Request, normal: int = Query(50, ge=10, le=100), seed: int = Query(7)):
+        limit(request, "simulation", svc.settings.rate_simulations_per_10_minutes, 600, "simulations")
         """The small load demo for the UI: N normal + 1 hidden attack, on its OWN isolated state
         (in-memory history and breaker), through the host's sandbox gate. SSE: one event per
         request, then the summary. Mock LLM numbers are labelled as such."""
@@ -526,8 +608,9 @@ def create_app(services: Services | None = None) -> FastAPI:
         return out
 
     @app.post("/scenarios/{name}/run")
-    def run_scenario(name: str, run_id: str | None = None) -> dict:
+    def run_scenario(request: Request, name: str, run_id: str | None = None) -> dict:
         """`run_id` may be chosen by the client (so it can subscribe to /stream?run_id first)."""
+        limit(request, "replay", svc.settings.rate_replays_per_minute, 60, "replays")
         files = _scenario_files()
         if name not in files:  # only known names: no paths from the client
             raise HTTPException(status_code=404, detail="unknown scenario")
@@ -588,8 +671,17 @@ def create_app(services: Services | None = None) -> FastAPI:
         iso.publish("-", "breaker_state", {**st, "level": level_of(st)})
         return {"reset": done, "breaker": st, "level": level_of(st)}
 
+    @app.post("/demo/reset")
+    def demo_reset(request: Request, body: DemoReset) -> dict:
+        """Public "Reset demo": drop the visitor's own runs (breaker, queue, history), back to
+        level 0. Run ids are random, so nobody can reset another visitor's demo by guessing.
+        The Guard's own state is not touched (lifting a real level needs the admin token)."""
+        limit(request, "demo_action", svc.settings.rate_demo_actions_per_minute, 60, "demo actions")
+        return {"reset": svc.forget_demos(body.run_ids), "level": 0}
+
     @app.post("/demo/{run_id}/pending/{hold_id}/{decision}")
-    def demo_decide(run_id: str, hold_id: str, decision: str) -> dict:
+    def demo_decide(request: Request, run_id: str, hold_id: str, decision: str) -> dict:
+        limit(request, "demo_action", svc.settings.rate_demo_actions_per_minute, 60, "demo actions")
         if decision not in ("approve", "reject"):
             raise HTTPException(status_code=404, detail="unknown decision")
         iso = svc.demo(run_id)

@@ -52,17 +52,18 @@ class FakeRunner:
             timings={"tx": 0.01})
 
 
-def make_services(tmp_path, runner=None, admin_token=ADMIN, clock=None, gate=None) -> Services:
+def make_services(tmp_path, runner=None, admin_token=ADMIN, clock=None, gate=None, explainer=None,
+                  **settings_kw) -> Services:
     scenarios = [load(p) for p in discover(SCENARIOS)]
     s = Settings(**{**Settings(llm_mode="mock").model_dump(), **merged_policy(scenarios),
                     "history_db": str(tmp_path / "h.sqlite3"), "admin_token": admin_token,
-                    "vultr_inference_api_key": SECRET_KEY, "llm_mode": "mock"})
+                    "vultr_inference_api_key": SECRET_KEY, "llm_mode": "mock", **settings_kw})
     history = History(s.history_db)
     bus = EventBus()
     from sandbox_runner import SandboxRunner
 
     guard = Guard(s, history, StaticStateProvider(merged_state(scenarios)),
-                  runner if runner is not None else SandboxRunner(s), LLMExplainer(s),
+                  runner if runner is not None else SandboxRunner(s), explainer or LLMExplainer(s),
                   breaker=Breaker(history, s), events=bus.publish, gate=gate or SandboxGate(4, 10),
                   **({"clock": clock} if clock else {}))
     key = GuardKey.load_or_create(tmp_path / "keys" / "guard.pem")
