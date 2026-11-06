@@ -1,0 +1,30 @@
+# Red team, 2026-11-06T18:50Z
+# Machine: laptop, Windows 11, 16 CPUs, Docker Desktop. Command: backend/cli.py redteam (no API running, so no health probe).
+
+Fail Closed | red-team containment | same limits as a normal check
+CONTAINED  write          1.4s  --read-only root, /tmp tmpfs noexec
+           tried : write to /, /etc, /usr, /sandbox, /home; run a binary from /tmp
+           result: 5/5 paths read-only; /tmp is a small tmpfs and noexec (blocked)
+CONTAINED  secrets        2.4s  no env, no mounts, no secrets in the image
+           tried : print env, read /proc/1/environ, search for .env, docker.sock, *.key, *.pem and the Guard key path
+           result: 4 env vars, none secret; host secret values found: 0; .env/docker.sock/*.key/*.pem found: 0; docker.sock absent; Guard key absent
+CONTAINED  network        1.5s  --network none
+           tried : connect to 1.1.1.1:443, the Docker host gateway, host.docker.internal, cloud metadata 169.254.169.254; DNS lookup of vultr.com
+           result: 6/6 attempts blocked; interfaces: lo; routes: 0
+CONTAINED  memory_bomb    2.7s  --memory 512m (no swap): OOM kill
+           tried : allocate 2000 MiB
+           result: memory.max 536870912 (swap 0); 2000 MiB allocation NOT completed; the kernel OOM-killed it (1 oom_kill event); peak seen by docker stats 360 MiB
+           host health during the run: 0/0 answered, avg None ms, max None ms
+CONTAINED  privilege      1.8s  --cap-drop ALL, no-new-privileges, non-root user
+           tried : mount, chown to root, setuid su, setpriv to uid 0, raw socket
+           result: capabilities all zero; NoNewPrivs 1; mount blocked; chown blocked; setuid su / setpriv never root; raw socket blocked
+CONTAINED  fork_bomb      8.9s  --pids-limit 128
+           tried : f() { f | f & }; f
+           result: pids.max 128; peak 128 processes (limit 128); 1473 forks refused by the kernel at the limit; stopped by the host after 9s, container destroyed
+           host health during the run: 0/0 answered, avg None ms, max None ms
+CONTAINED  cpu_spin      30.8s  --cpus 1 + hard timeout 30s
+           tried : while :; do :; done
+           result: cpu.max 100000 100000 (1 CPU); stopped by the hard timeout after 31s (SANDBOX_TIMEOUT_SECONDS=30), container destroyed
+
+ALL CONTAINED
+exit code: 0

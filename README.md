@@ -9,7 +9,8 @@ AI (Vultr Serverless Inference) explains the decision in plain words; it never d
 signer signs only with a Guard approval for that exact request: **no approval, no signature.**
 
 Built for the **Vultr Agent Rush** hackathon on lablab.ai, **Challenge 1: Blast Radius Zero**
-(3–8 November 2026). Slides: [`docs/slides/fail-closed.pdf`](docs/slides/fail-closed.pdf).
+(3–8 November 2026). Slides: [`docs/slides/fail-closed-vm.pdf`](docs/slides/fail-closed-vm.pdf)
+(a laptop version for Plan B: [`fail-closed-laptop.pdf`](docs/slides/fail-closed-laptop.pdf)).
 
 **Live demo:** coming soon (the Vultr VM is not deployed yet).
 
@@ -28,7 +29,7 @@ Two public incidents inspired this project. Each one shows a class of attack.
 | Incident | Attack class | In the demo |
 |---|---|---|
 | **Binance**, 29 Oct 2026 | **Hot wallet delegation drain (EIP-7702).** A compromised service gets the signer to sign authorizations that hand a hot wallet to an attacker's contract. The contract then empties it. | Replay (d) |
-| **Mercado Bitcoin**, 2 Nov 2026 | **Multi-chain drain after key theft.** Plain signed transfers send the funds to attacker addresses on many chains, token by token. | Replay (e) |
+| **Mercado Bitcoin**, 2 Nov 2026 | **Multi-chain hot wallet drain** (the cause is not public). Plain signed transfers send the funds to attacker addresses on many chains, token by token. | Replay (e) |
 
 Fail Closed is designed to reject this class of attack. We do not claim it would have stopped these incidents.
 
@@ -43,6 +44,7 @@ What was reported (sources at the end):
   signed transfers.
 - **Mercado Bitcoin.** About $38–49M (estimates vary). No EIP-7702: plain signed transfers to
   attacker addresses on at least 10 chains, hundreds of tokens (about 185 on Ethereum alone).
+  Plain transfers, not a smart-contract exploit (Hypernative). The cause is not public.
 - **Both exchanges** then paused withdrawals for all customers.
 
 The common problem: **the signer trusted where a request came from, and never checked what it
@@ -210,8 +212,9 @@ data in `docs/results/llm_eval.md`):
 Model latency changes from day to day: on 2026-11-05 six sequential `glm-5.3-flash` calls took
 2.0–7.2 s (laptop, a separate latency probe; not saved as a file).
 
-**Red team: 7/7 contained.** Laptop, Docker Desktop, `backend/cli.py redteam`, 2026-11-03; the
-same 7 checks pass in every browser test run (last: 2026-11-06). Details in the next section.
+**Red team: 7/7 contained.** Laptop, Docker Desktop, `backend/cli.py redteam`, 2026-11-06, file
+`docs/results/redteam-20261106.txt` (first run 2026-11-03); the same 7 checks pass in every browser
+test run. Details in the next section.
 
 ## Security and containment
 
@@ -311,7 +314,8 @@ backend/.venv/bin/python backend/cli.py redteam    # containment check
 | (g) Coordinated attack on several wallets and chains | breaker level 1 → 2 → 3 → 4; an operator lifts it with the admin token |
 
 The API (`backend/app/api.py`): `POST /check` (dry run, never an approval), `POST /withdraw`
-(Guard → approval → mock signer), `GET /stream` (live events), `GET /scenarios` and
+(Guard → approval → mock signer), `GET /stream` (live events; the page falls back to polling
+`GET /events` when the stream does not get through, or always with `LIVE_UPDATES=poll`), `GET /scenarios` and
 `POST /scenarios/{name}/run`, `GET /policies`, `GET /breaker`, admin resets with `X-Admin-Token`,
 `POST /demo/reset`, `POST /loadtest/run`, `POST /redteam/run`. Deploying to Vultr: `docs/deploy.md`.
 

@@ -51,7 +51,13 @@
   .shot .chrome i { width: 11px; height: 11px; border-radius: 50%; background: var(--border-strong); display: block; }
   .shot img { display: block; width: 100%; }
   .logo { width: 72px; height: 72px; }
+  /* where the demo runs: docs/slides/export.py builds fail-closed-vm.pdf and fail-closed-laptop.pdf */
+  html[data-target="vm"] .laptop-only, html[data-target="laptop"] .vm-only { display: none !important; }
 </style>
+<script>
+  document.documentElement.dataset.target =
+    new URLSearchParams(location.search).get("target") === "laptop" ? "laptop" : "vm";
+</script>
 </head>
 <body>
 
@@ -63,14 +69,15 @@
   <h1 style="margin-top:44px;font-size:150px;line-height:1;font-weight:700;color:var(--ink);letter-spacing:-0.04em">Fail Closed</h1>
   <p style="margin-top:30px;font-size:64px;font-weight:600;color:var(--brand);letter-spacing:-0.015em">No approval, no signature.</p>
   <p class="lead" style="margin-top:36px;font-size:38px">An independent co-signer for crypto wallets. Unusual withdrawals run in an isolated sandbox before anything is signed.</p>
-  <p style="margin-top:56px;font-size:30px;font-weight:500;color:var(--muted)">Built on Vultr Serverless Inference + Cloud Compute</p>
+  <p class="vm-only" style="margin-top:56px;font-size:30px;font-weight:500;color:var(--muted)">Built on Vultr Serverless Inference + Cloud Compute</p>
+  <p class="laptop-only" style="margin-top:56px;font-size:30px;font-weight:500;color:var(--muted)">AI on Vultr Serverless Inference · the demo runs on a laptop (the Vultr VM was blocked by account review)</p>
   <div class="foot"><span>Vultr Agent Rush · Challenge 1: Blast Radius Zero · November 2026</span><span>1</span></div>
 </section>
 
 <!-- 2. The problem -->
 <section class="slide">
   <p class="kicker">The problem</p>
-  <h2>Two real attacks. The signer signed what it was asked.</h2>
+  <h2>Two real attacks. Valid signatures, wrong withdrawals.</h2>
   <div style="margin-top:48px;display:grid;grid-template-columns:1fr 1fr;gap:40px">
     <div class="card">
       <p style="font-size:32px;font-weight:700;color:var(--ink)">Binance · 29 Oct 2026</p>
@@ -83,11 +90,11 @@
     </div>
     <div class="card">
       <p style="font-size:32px;font-weight:700;color:var(--ink)">Mercado Bitcoin · 2 Nov 2026</p>
-      <p style="margin-top:6px;font-size:26px;font-weight:600;color:var(--brand)">Multi-chain drain after key theft</p>
+      <p style="margin-top:6px;font-size:26px;font-weight:600;color:var(--brand)">Multi-chain hot wallet drain</p>
       <ul style="margin-top:22px;font-size:29px;line-height:1.42;padding-left:30px;display:grid;gap:12px">
         <li>About $38–49M (estimates vary), in plain signed transfers.</li>
         <li>Attacker addresses on at least 10 chains; hundreds of tokens (about 185 on Ethereum alone).</li>
-        <li>Each transfer looked normal on its own.</li>
+        <li>Plain transfers, not a smart-contract exploit (Hypernative).</li>
       </ul>
     </div>
   </div>
@@ -125,7 +132,9 @@
 <!-- 5. How it works -->
 <section class="slide" style="padding-top:64px">
   <p class="kicker">How it works</p>
-  <img src="../brand/architecture.png" alt="Architecture: request, Guard, fast path or sandbox, rule engine, approval, signer"
+  <img class="laptop-only" src="../brand/architecture-laptop.png" alt="Architecture on the demo laptop: Cloudflare tunnel, Guard, fast path or sandbox, rule engine, approval, signer"
+       style="display:block;margin:20px auto 0;width:1560px;border-radius:16px;border:1px solid var(--border)">
+  <img class="vm-only" src="../brand/architecture.png" alt="Architecture: request, Guard, fast path or sandbox, rule engine, approval, signer"
        style="display:block;margin:20px auto 0;width:1560px;border-radius:16px;border:1px solid var(--border)">
   <span class="num">5</span>
 </section>
@@ -148,27 +157,15 @@
       <p style="margin-top:10px;font-size:23px;line-height:1.42">A prototype of that decision logic: fixed rules decide, unusual requests run in an isolated sandbox, every failure fails closed, a scoped circuit breaker, the AI only explains.</p>
     </div>
   </div>
-  <div style="margin-top:28px;display:grid;grid-template-columns:1fr 1fr;gap:28px">
-    <div>
-      <p style="font-size:25px;font-weight:700;color:var(--brand)">Built in this prototype</p>
-      <ul style="margin-top:10px;font-size:22px;line-height:1.4;padding-left:26px;display:grid;gap:4px">
-        <li>Fixed rules decide; the AI explains and may ask for a deeper check</li>
-        <li>Isolated sandbox: state diff and a delegation probe</li>
-        <li>Fails closed on every error, timeout or empty result</li>
-        <li>Scoped circuit breaker: address, wallet, chain, global</li>
-        <li>Approval bound to the request hash; the signer checks it</li>
-      </ul>
-    </div>
-    <div>
-      <p style="font-size:25px;font-weight:700;color:var(--muted)">Next (not built)</p>
-      <ul style="margin-top:10px;font-size:22px;line-height:1.4;padding-left:26px;display:grid;gap:4px">
-        <li>Plug into one real signer hook</li>
-        <li>Check every signature against an approved withdrawal in the exchange ledger (separate trust domain)</li>
-        <li>Deny unknown operation types on withdrawal wallets (e.g. EIP-7702 delegation)</li>
-        <li>Rules for deposit-address sweeps</li>
-        <li>A pre-approved path to revoke a bad EIP-7702 delegation that the breaker never blocks</li>
-      </ul>
-    </div>
+  <div style="margin-top:40px;max-width:1300px">
+    <p style="font-size:30px;font-weight:700;color:var(--brand)">Built in this prototype</p>
+    <ul style="margin-top:14px;font-size:28px;line-height:1.45;padding-left:30px;display:grid;gap:8px">
+      <li>Fixed rules decide; the AI explains and may ask for a deeper check</li>
+      <li>Isolated sandbox: state diff and a delegation probe</li>
+      <li>Fails closed on every error, timeout or empty result</li>
+      <li>Scoped circuit breaker: address, wallet, chain, global</li>
+      <li>Approval bound to the request hash; the signer checks it</li>
+    </ul>
   </div>
   <span class="num">6</span>
 </section>
@@ -178,11 +175,15 @@
   <p class="kicker">Demo 1 · Hot wallet delegation drain</p>
   <h2 style="font-size:60px">Blocked. Nothing was signed.</h2>
   <div style="margin-top:40px;display:grid;grid-template-columns:1040px 1fr;gap:56px;align-items:start">
-    <div class="shot"><div class="chrome"><i></i><i></i><i></i></div><img src="../brand/cover-ui.png" alt="The request detail: Blocked, nothing was signed"></div>
-    <ul class="big" style="margin-top:4px;gap:26px">
-      <li style="font-size:31px">The sandbox shows the wallet would be <b>handed to an unknown contract</b>.</li>
-      <li style="font-size:31px">A test call as the attacker <b>moves 100 ETH</b> out (fake funds, in the sandbox).</li>
-      <li style="font-size:31px">No approval, so <b>the signer refuses</b>. The wallet is paused.</li>
+    <!-- the real request page (docs/brand/cover-ui.png), cut above the step bar -->
+    <div class="shot"><div class="chrome"><i></i><i></i><i></i></div>
+      <div style="height:552px;background:#fff url('../brand/cover-ui.png') no-repeat 0 0 / 1040px auto"
+           role="img" aria-label="The request detail: Blocked, nothing was signed"></div></div>
+    <ul class="big" style="margin-top:4px;gap:22px">
+      <li style="font-size:29px">The sandbox shows the wallet would be <b>handed to an unknown contract</b>.</li>
+      <li style="font-size:29px">A test call as the attacker <b>moves 100 ETH</b> out (fake funds, in the sandbox).</li>
+      <li style="font-size:29px">No approval, so <b>the signer refuses</b>. The wallet is paused.</li>
+      <li style="font-size:26px;color:var(--muted)">The AI (Vultr <b>glm-5.3</b>) explains afterwards, in plain words: <i>"This is a classic pattern for handing over control of a hot wallet, not an ordinary withdrawal."</i> It did not decide.</li>
     </ul>
   </div>
   <span class="num">7</span>
@@ -206,7 +207,7 @@
       <li style="font-size:29px">Level 1 freezes <b>one address</b>.</li>
       <li style="font-size:29px">Level 2 pauses <b>one wallet</b>.</li>
       <li style="font-size:29px">Level 3: <b>one chain</b> in safe mode.</li>
-      <li style="font-size:29px">Other customers keep being paid until level 4.</li>
+      <li style="font-size:29px">Customers outside the stopped scope keep being paid until level 4.</li>
       <li style="font-size:29px">Level 4 needs <b>two independent signals</b>. Only an operator lifts it, with the admin token.</li>
     </ul>
   </div>
@@ -222,16 +223,18 @@
       <tbody>
         <tr style="border-bottom:1px solid var(--border)"><td style="padding:20px 0;color:var(--muted)">Attack stopped</td><td style="font-weight:700;color:var(--ink)">yes, in all 4 setups</td></tr>
         <tr style="border-bottom:1px solid var(--border)"><td style="padding:20px 0;color:var(--muted)">Normal customers refused</td><td style="font-weight:700;color:var(--ink)">0 of 500</td></tr>
-        <tr style="border-bottom:1px solid var(--border)"><td style="padding:20px 0;color:var(--muted)">Fast path (plain payout to a known customer)</td><td style="font-weight:700;color:var(--ink)">3 ms median</td></tr>
+        <tr style="border-bottom:1px solid var(--border)"><td style="padding:20px 0;color:var(--muted)">Fast path (plain payout to a known customer)</td><td style="font-weight:700;color:var(--ink)">3 ms median (warm setup)</td></tr>
         <tr style="border-bottom:1px solid var(--border)"><td style="padding:20px 0;color:var(--muted)">Slow path (full sandbox check)</td><td style="font-weight:700;color:var(--ink)">1.3 s median (warm) · 2.4 s (fresh)</td></tr>
         <tr style="border-bottom:1px solid var(--border)"><td style="padding:20px 0;color:var(--muted)">Same check with the real Vultr model (49 + 1)</td><td style="font-weight:700;color:var(--ink)">attack stopped · 0 refused · 0 rate limits</td></tr>
         <tr><td style="padding:20px 0;color:var(--muted)">Red team: hostile code inside the sandbox</td><td style="font-weight:700;color:var(--ink)">7 of 7 contained</td></tr>
       </tbody>
     </table>
   </div>
-  <p class="note" style="margin-top:26px">Measured on a laptop (Windows 11, 16 CPUs, Docker Desktop), 6 Nov 2026, with <span class="mono">backend/cli.py loadtest</span>:
-    mock AI (800 ms per call) for the 500 + 1; real Vultr <span>glm-5.3-flash</span> for the 49 + 1. Red team: the browser test run of 6 Nov 2026.
-    Not yet measured on the Vultr VM. Data: <span>docs/results/</span>.</p>
+  <p class="note" style="margin-top:22px">Measured on a laptop (Windows 11, 16 CPUs, Docker Desktop), 6 Nov 2026.
+    Rows 1–4: <span>backend/cli.py loadtest</span>, mock AI (800 ms per call), file <span>docs/results/loadtest-20261106-111314.md</span>.
+    Row 5: real Vultr <span>glm-5.3-flash</span> + <span>glm-5.3</span>, file <span>docs/results/live/loadtest-20261106-111340.md</span>.
+    Row 6: <span>backend/cli.py redteam</span>, file <span>docs/results/redteam-20261106.txt</span>.
+    <span class="vm-only">Not yet measured on the Vultr VM.</span><span class="laptop-only">The Vultr VM was blocked by account review, so all numbers are from the laptop.</span></p>
   <span class="num">9</span>
 </section>
 
@@ -259,7 +262,8 @@
         <li>A hackathon prototype: local test chain, fake funds.</li>
         <li>It does not stop the first break-in. It stops the break-in from getting a signature.</li>
         <li>If an attacker takes over the Guard or its key, the protection is gone: run it separately.</li>
-        <li>Numbers so far come from a laptop, not yet from the VM.</li>
+        <li class="vm-only">Numbers so far come from a laptop, not yet from the VM.</li>
+        <li class="laptop-only">The Vultr VM was blocked by account review, so the demo and all numbers are from a laptop.</li>
       </ul>
     </div>
     <div class="card">

@@ -85,10 +85,11 @@
   <text x="668" y="596" class="sm">what would really happen</text>
 
   <!-- rule engine + breaker -->
-  <rect x="938" y="400" width="176" height="112" rx="12" class="key"/>
+  <rect x="938" y="400" width="176" height="128" rx="12" class="key"/>
   <text x="958" y="436" class="h">Rule engine</text>
-  <text x="958" y="464" class="s">decides:</text>
-  <text x="958" y="488" class="s">allow / hold / block</text>
+  <text x="958" y="462" class="s">decides: allow,</text>
+  <text x="958" y="484" class="s">delay, needs</text>
+  <text x="958" y="506" class="s">review or block</text>
 
   <rect x="938" y="562" width="176" height="152" rx="12" class="box"/>
   <text x="958" y="596" class="h">Circuit breaker</text>
@@ -132,7 +133,7 @@
   <path d="M1114 440 H1142" class="allow" marker-end="url(#g)"/>
   <text x="1132" y="390" text-anchor="middle" font-size="13" font-weight="700" fill="#0f766e">ALLOW</text>
   <path d="M1336 456 H1364" class="allow" marker-end="url(#g)"/>
-  <path d="M1026 512 V554" class="flow" marker-end="url(#a)"/>
+  <path d="M1026 528 V554" class="flow" marker-end="url(#a)"/>
   <path d="M1114 486 C1132 486 1128 630 1142 630" class="red" marker-end="url(#r)"/>
   <text x="1150" y="576" font-size="13" font-weight="700" fill="#b42318">BLOCK</text>
   <path d="M1114 662 H1142" class="red" marker-end="url(#r)"/>

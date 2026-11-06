@@ -1,9 +1,11 @@
-"""Export the slide deck to PDF (16:9, 1920x1080 per page), plus a PNG per slide to check it.
+"""Export the slide deck to PDF (16:9, 1920x1080 per page) in two versions, plus a PNG per slide.
 
     backend/.venv/Scripts/python docs/slides/export.py      # Windows
     backend/.venv/bin/python docs/slides/export.py          # Linux / macOS
 
-Writes docs/slides/fail-closed.pdf and docs/slides/check/slide-NN.png (not committed).
+Writes docs/slides/fail-closed-vm.pdf (the demo on the Vultr VM) and fail-closed-laptop.pdf
+(Plan B: the demo on a laptop, the AI still on Vultr), and docs/slides/check/<target>-NN.png
+(not committed).
 """
 
 from pathlib import Path
@@ -14,20 +16,24 @@ HERE = Path(__file__).resolve().parent
 
 
 def main() -> None:
+    check = HERE / "check"
+    check.mkdir(exist_ok=True)
     with sync_playwright() as p:
         b = p.chromium.launch()
-        page = b.new_page(viewport={"width": 1920, "height": 1080})
-        page.goto((HERE / "slides.html").as_uri())
-        page.evaluate("document.fonts.ready")
-        page.wait_for_function("[...document.images].every(i => i.complete && i.naturalWidth > 0)")
-        page.pdf(path=str(HERE / "fail-closed.pdf"), width="1920px", height="1080px", print_background=True,
-                 margin={"top": "0", "right": "0", "bottom": "0", "left": "0"})
-        check = HERE / "check"
-        check.mkdir(exist_ok=True)
-        slides = page.locator("section.slide")
-        for i in range(slides.count()):
-            slides.nth(i).screenshot(path=str(check / f"slide-{i + 1:02d}.png"))
-        print(f"wrote docs/slides/fail-closed.pdf ({slides.count()} slides)")
+        for target in ("vm", "laptop"):
+            page = b.new_page(viewport={"width": 1920, "height": 1080})
+            page.goto((HERE / "slides.html").as_uri() + f"?target={target}")
+            page.evaluate("document.fonts.ready")
+            page.wait_for_function("[...document.images].every(i => i.complete)")
+            page.wait_for_timeout(300)
+            pdf = page.pdf(width="1920px", height="1080px", print_background=True,
+                           margin={"top": "0", "right": "0", "bottom": "0", "left": "0"})
+            (HERE / f"fail-closed-{target}.pdf").write_bytes(pdf)  # written by us: robust on Windows
+            slides = page.locator("section.slide")
+            for i in range(slides.count()):
+                (check / f"{target}-{i + 1:02d}.png").write_bytes(slides.nth(i).screenshot())
+            print(f"wrote docs/slides/fail-closed-{target}.pdf ({slides.count()} slides)")
+            page.close()
         b.close()
 
 
