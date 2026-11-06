@@ -132,3 +132,22 @@ def test_interrupt_removes_the_runs_containers(tmp_path):
             p.kill()
         for c in _owned(owner) if owner else []:
             c.remove(force=True)
+
+
+def test_cleanup_first_stops_new_sandboxes():
+    import sandbox_runner
+    from sandbox_runner import SandboxError, SandboxRunner
+
+    calls = []
+    runner = SandboxRunner.__new__(SandboxRunner)
+    runner._client = SimpleNamespace(containers=SimpleNamespace(run=lambda *a, **k: calls.append(a) or "c"))
+    try:
+        assert runner._new_container("img") == "c"
+        c = safety.Cleanup(safety.owner_for(), lambda: FakeClient([]), watch_parent=False, gap=0,
+                           before=sandbox_runner.close_creation)
+        c.run("signal SIGINT")
+        with pytest.raises(SandboxError, match="no new sandbox containers"):
+            runner._new_container("img")
+        assert len(calls) == 1
+    finally:
+        sandbox_runner.CREATION_CLOSED.clear()

@@ -80,6 +80,15 @@ _HASH = re.compile(r"0x[0-9a-fA-F]{64}")
 _ZERO_FEES = ["--gas-price", "0", "--priority-gas-price", "0"]
 
 
+# Set when a load test is being stopped (Ctrl+C, SIGTERM, lost parent): no NEW sandbox
+# containers may start, so the cleanup cannot race a container that is about to be created.
+CREATION_CLOSED = threading.Event()
+
+
+def close_creation() -> None:
+    CREATION_CLOSED.set()
+
+
 class SandboxError(Exception):
     """The sandbox could not produce a trustworthy result. Always means R0 / BLOCK."""
 
@@ -486,7 +495,7 @@ class SandboxRunner:
         t0 = self.clock()
         c = None
         try:
-            c = self.client.containers.run(self.settings.sandbox_image, command=anvil_args(),
+            c = self._new_container(self.settings.sandbox_image, command=anvil_args(),
                                            name=f"fc-warmup-{uuid.uuid4().hex[:8]}", **container_options(self.settings))
             self._count_start()
             self._wait_ready(c)
@@ -519,7 +528,7 @@ class SandboxRunner:
             snapshot = self._set_chain(container, tx.chain_id, snapshot=True)
             run.timings["pool_acquire" if reused else "container_start"] = t() - t0
         else:
-            container = self.client.containers.run(
+            container = self._new_container(
                 self.settings.sandbox_image,
                 command=anvil_args(),
                 name=run.name,
@@ -620,9 +629,14 @@ class SandboxRunner:
         with self._started_lock:
             self.started += 1
 
+    def _new_container(self, *args: Any, **kwargs: Any) -> Any:
+        if CREATION_CLOSED.is_set():
+            raise SandboxError("shutting down: no new sandbox containers")
+        return self.client.containers.run(*args, **kwargs)
+
     def _start_container(self, args: list[str], name: str) -> tuple[Any, dict[str, Any]]:
         """Start one sandbox container with the standard limits and wait until anvil answers."""
-        c = self.client.containers.run(self.settings.sandbox_image, command=args, name=name,
+        c = self._new_container(self.settings.sandbox_image, command=args, name=name,
                                        **container_options(self.settings))
         self._count_start()
         try:

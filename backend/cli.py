@@ -478,7 +478,9 @@ def cmd_loadtest(args) -> int:
         client_factory, stale = None, 0
         print(f"note: could not check for leftover containers ({type(e).__name__})")
     if client_factory is not None:
-        safety.Cleanup(owner, client_factory).install()
+        from sandbox_runner import close_creation
+
+        safety.Cleanup(owner, client_factory, before=close_creation).install()
     llm = (f"REAL LLM {base.vultr_model}, AI concurrency {base.llm_concurrency}" if live
            else f"MOCK LLM {args.latency_ms} ms, escalates {args.escalate_rate:.0%}")
     print(f"Fail Closed | load test {args.normal} normal + 1 attack | configs: {', '.join(configs)} | {llm}")

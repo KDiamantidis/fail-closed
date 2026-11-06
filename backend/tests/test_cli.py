@@ -66,4 +66,4 @@ def test_run_all_meets_every_expectation(tmp_path, capsys):
     assert "all expectations met" in out
     # (e) and (g) freeze one address each; (d) pauses 1 wallet and (g) pauses 4
     assert "frozen destinations (level 1): 2" in out and "paused wallets (level 2): 5" in out
-    assert "global stop (level 4): off" in out  # (g) ends with the ops lead reset
+    assert "global stop (level 4): ON - " in out  # (g) ends at the global stop; an operator lifts it

@@ -102,8 +102,9 @@ class Cleanup:
     """Install once per load-test process: signals, exit, and a watch on the parent process."""
 
     def __init__(self, owner: str, client_factory, watch_parent: bool = True, poll: float = 1.0,
-                 passes: int = 20, gap: float = 0.5):
+                 passes: int = 30, gap: float = 1.0, before=None, quiet_passes: int = 3):
         self.owner, self.client_factory, self.poll = owner, client_factory, poll
+        self.before, self.quiet_passes = before, quiet_passes  # before(): stop new containers first
         self.passes, self.gap = passes, gap
         self._done = threading.Lock()
         self._ran = False
@@ -115,13 +116,15 @@ class Cleanup:
                 return 0
             self._ran = True
         try:
+            if self.before is not None:
+                self.before()  # no new sandbox containers from now on
             client = self.client_factory()
-            # repeat: a check or a pool refill may be starting a container right now
+            # repeat: a container whose creation was already in flight may still appear
             n, quiet = 0, 0
             for _ in range(self.passes):
                 got = remove_containers(client, owner=self.owner)
                 n, quiet = n + got, (0 if got else quiet + 1)
-                if quiet >= 2:
+                if quiet >= self.quiet_passes:
                     break
                 time.sleep(self.gap)
         except Exception as e:  # noqa: BLE001
