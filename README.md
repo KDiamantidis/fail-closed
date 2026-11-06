@@ -350,8 +350,8 @@ Incidents:
 - TRM Labs, [North Korea steals USD 6.36 billion from Binance](https://www.trmlabs.com/resources/blog/north-korea-steals-usd-6-36-billion-from-binance-in-the-largest-hack-in-history)
 - BleepingComputer, [Binance links theft to compromised DevOps laptop](https://bleepingcomputer.com/news/security/binance-links-63-billion-crypto-theft-to-compromised-devops-laptop)
 - DEV Community, [50 signatures and a 37-minute race](https://dev.to/thevenice/how-a-53b-binance-hot-wallet-hack-worked-eip-7702-50-signatures-and-a-37-minute-race-2lea)
-- Blockaid's analysis of the EIP-7702 authorizations (cited in the text; link to be added)
-- Mercado Bitcoin: link to be added
+- Blockaid, [analysis of the Binance hack and the EIP-7702 authorizations](https://blockaid.io/blog/binance-55b-hack-using-advanced-ai-models-blockaid-detects-the-biggest-theft-in-crypto-history)
+- Decrypt, [Mercado Bitcoin halts withdrawals after hack](https://decrypt.co/382341/mercado-bitcoin-halts-withdrawals-40-million-hack)
 
 Products in "Where Fail Closed fits":
 - DFNS, [Introducing Validation Gate](https://dfns.co/article/introducing-validation-gate)
