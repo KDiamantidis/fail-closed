@@ -323,7 +323,7 @@ def ai_cells(r: dict) -> str:
     unav = r["ai_unavailable"]
     why = ", ".join(f"{k} {v}" for k, v in r["ai_unavailable_by_reason"].items())
     failed = sum(u["failures"].values())
-    cost = f"${u['cost_usd']:.4f}" if u.get("cost_usd") is not None else "n/a"
+    cost = f"${u['cost_usd']:.4f}" if u.get("cost_usd") is not None and u.get("mode") == "live" else "n/a"
     n429 = u["failures"].get("rate limited (429)", 0)
     return (f" {r['new_destinations']} ({r['new_dest_simulated']}) | {r['large_amounts']} ({r['ai_asked']}) "
             f"| {r['escalated']} | {unav}{f' ({why})' if why else ''} "

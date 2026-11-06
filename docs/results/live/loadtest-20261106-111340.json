@@ -1,0 +1,145 @@
+{
+  "machine": {
+    "os": "Windows-11-10.0.26300-SP0",
+    "python": "3.14.7",
+    "cpus": 16,
+    "processor": "AMD64 Family 25 Model 80 Stepping 0, AuthenticAMD",
+    "docker": "29.8.0",
+    "docker_os": "Docker Desktop",
+    "docker_cpus": 16,
+    "docker_mem_gib": 7.4
+  },
+  "seed": 7,
+  "results": [
+    {
+      "config": "warm/escalation-on",
+      "overrides": {
+        "sandbox_mode": "warm",
+        "fast_path_llm_escalation": true
+      },
+      "requests": 50,
+      "normal": 49,
+      "attacks": 1,
+      "attacks_stopped": 1,
+      "attack_result": {
+        "i": 22,
+        "attack": true,
+        "kind": "eip7702-attack",
+        "chain": 1,
+        "verdict": "BLOCK",
+        "new_dest": false,
+        "large": false,
+        "ai_asked": false,
+        "new_dest_simulated": false,
+        "path": "slow",
+        "rules": [
+          "C1",
+          "R1",
+          "R2",
+          "R3"
+        ],
+        "signed": false,
+        "ms": 1507.2,
+        "escalated": false,
+        "ai_unavailable": null,
+        "detail": "[R2] Nonces 999, 1000, 1001. A wallet never needs more than one; many nonces at once is how an attacker makes sure one of them matches.; [C1] Customer withdrawals are plain transfers (native or a known token). 3 EIP-7702 authorization(s).; [R1] 0x1000000000000000000000000000000000000104 gets code 0xef010000000000000000000000000000000000005eeeee (was 0x): from now on it runs the code of 0x00000000000000000000000000000000005eeeee, which i; [R3] 0x1000000000000000000000000000000000000104 -> 0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc: 3,000 ETH of 3,000 ETH (100.0%). Evidence: probe: 0x3c44..93bc (address hard-coded in delegate code) call",
+        "timings_ms": {
+          "state": 0,
+          "request_rules": 5,
+          "sandbox": 1501,
+          "sandbox.pool_acquire": 160,
+          "sandbox.state_inject": 283,
+          "sandbox.tx": 332,
+          "sandbox.trace": 67,
+          "sandbox.probe": 612,
+          "sandbox.revert": 47,
+          "sandbox.release": 0,
+          "decide": 0,
+          "total": 1506
+        }
+      },
+      "normal_not_allowed": 0,
+      "normal_not_allowed_by_verdict": {},
+      "normal_not_allowed_by_rule": {},
+      "normal_not_allowed_rows": [],
+      "normal_signed": 49,
+      "paths": {
+        "fast": 41,
+        "slow": 9
+      },
+      "escalated": 0,
+      "new_destinations": 5,
+      "new_dest_simulated": 5,
+      "large_amounts": 3,
+      "ai_asked": 3,
+      "llm_slots": {
+        "limit": 3,
+        "in_use": 0,
+        "peak": 3,
+        "explain_waits": 2
+      },
+      "latency_ms": {
+        "fast": {
+          "n": 41,
+          "p50": 6.8,
+          "p95": 14.5,
+          "p99": 20.2,
+          "mean": 8.0
+        },
+        "slow": {
+          "n": 9,
+          "p50": 1308.1,
+          "p95": 2474.4,
+          "p99": 2479.5,
+          "mean": 1509.3
+        },
+        "early": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "mean": null
+        }
+      },
+      "total_seconds": 3.15,
+      "throughput_rps": 15.9,
+      "concurrency": 8,
+      "sandboxes_started": 4,
+      "sandbox_retries": 0,
+      "busy_503": 0,
+      "pool": {
+        "started": 4,
+        "reused": 9,
+        "dirty": 0,
+        "discarded": 0,
+        "retired": 0
+      },
+      "pool_warm_up_seconds": 1.86,
+      "ai_unavailable": 3,
+      "ai_unavailable_by_reason": {
+        "timeout 2 s": 2,
+        "busy, 3 AI calls already running": 1
+      },
+      "llm": {
+        "mode": "live",
+        "model": "glm-5.3-flash",
+        "reasoning_effort": "minimal",
+        "latency_ms": null,
+        "escalate_rate": null,
+        "calls": 11,
+        "ok": 11,
+        "failures": {},
+        "prompt_tokens": 13613,
+        "completion_tokens": 2124,
+        "cost_usd": 0.014894,
+        "calls_by_model": {
+          "glm-5.3-flash": 2,
+          "glm-5.3": 9
+        }
+      },
+      "sandbox_timeout_seconds": 30.0
+    }
+  ],
+  "created": "20261106-111340",
+  "note": "laptop, Docker Desktop, real Vultr model glm-5.3-flash; to be re-run on the Vultr VM"
+}
