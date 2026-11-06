@@ -44,7 +44,7 @@ What was reported (sources at the end):
   signed transfers.
 - **Mercado Bitcoin.** About $38–49M (estimates vary). No EIP-7702: plain signed transfers to
   attacker addresses on at least 10 chains, hundreds of tokens (about 185 on Ethereum alone).
-  Plain transfers, not a smart-contract exploit (Hypernative). The cause is not public.
+  How the attacker got in has not been made public.
 - **Both exchanges** then paused withdrawals for all customers.
 
 The common problem: **the signer trusted where a request came from, and never checked what it
