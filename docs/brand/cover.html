@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fail Closed cover</title>
+<!-- Submission cover, 1920x1080. Exported to PNG by docs/brand/export.py.
+     Colours and fonts are the web UI's (frontend/src/index.css). -->
+<style>
+  @font-face { font-family: "Inter"; font-weight: 400; src: url("fonts/inter-latin-400-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Inter"; font-weight: 500; src: url("fonts/inter-latin-500-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Inter"; font-weight: 600; src: url("fonts/inter-latin-600-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Inter"; font-weight: 700; src: url("fonts/inter-latin-700-normal.woff2") format("woff2"); }
+  :root {
+    --canvas: #f6f7f9; --surface: #ffffff; --border: #e4e7ec; --border-strong: #d0d5dd;
+    --ink: #101828; --body: #344054; --muted: #667085; --faint: #98a2b3;
+    --brand: #0f766e; --brand-tint: #ecfdf8;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; }
+  body {
+    background: var(--canvas); color: var(--body);
+    font-family: "Inter", system-ui, sans-serif; font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased; position: relative;
+  }
+  .text { position: absolute; left: 112px; top: 0; bottom: 0; width: 700px;
+          display: flex; flex-direction: column; justify-content: center; }
+  .mark { display: flex; align-items: center; gap: 16px; margin-bottom: 40px; }
+  .mark svg { width: 64px; height: 64px; }
+  .mark span { font-size: 26px; font-weight: 600; color: var(--muted); letter-spacing: 0.01em; }
+  h1 { font-size: 120px; line-height: 1; font-weight: 700; color: var(--ink); letter-spacing: -0.035em; }
+  .tagline { margin-top: 26px; font-size: 50px; line-height: 1.1; font-weight: 600; color: var(--brand); letter-spacing: -0.015em; }
+  .line { margin-top: 34px; font-size: 29px; line-height: 1.45; color: var(--body); max-width: 680px; }
+  .built { margin-top: 56px; display: inline-flex; align-items: center; gap: 12px; font-size: 26px;
+           font-weight: 500; color: var(--muted); }
+  .built i { width: 8px; height: 8px; border-radius: 50%; background: var(--brand); display: inline-block; }
+
+  /* the real UI (docs/brand/cover-ui.png: the delegation-drain detail at 1000 px wide, taken by
+     the browser test with FC_SCREENSHOTS=1), framed like a product screenshot, shown 1:1 */
+  .shot { position: absolute; left: 852px; top: 222px; width: 1002px; border-radius: 16px;
+          background: var(--surface); border: 1px solid var(--border-strong); overflow: hidden;
+          box-shadow: 0 40px 80px -24px rgb(16 24 40 / 0.22), 0 12px 24px -8px rgb(16 24 40 / 0.08); }
+  .chrome { height: 44px; display: flex; align-items: center; gap: 9px; padding: 0 18px;
+            border-bottom: 1px solid var(--border); background: #fbfbfc; }
+  .chrome i { width: 12px; height: 12px; border-radius: 50%; background: var(--border-strong); display: block; }
+  .chrome .url { margin-left: 16px; height: 24px; width: 360px; border-radius: 7px; background: var(--canvas);
+                 border: 1px solid var(--border); }
+  .ui { width: 1000px; height: 590px; background: url("cover-ui.png") no-repeat 0 0 / 1000px auto; }
+</style>
+</head>
+<body>
+  <div class="text">
+    <div class="mark">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect width="24" height="24" rx="6" fill="#0f766e"/>
+        <path d="M12 5.5l5 2v4.2c0 3.1-2.1 5.4-5 6.3-2.9-.9-5-3.2-5-6.3V7.5l5-2z" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/>
+        <path d="M9.6 11.8l1.7 1.7 3.2-3.4" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>Signing Guard</span>
+    </div>
+    <h1>Fail Closed</h1>
+    <p class="tagline">No approval, no signature.</p>
+    <p class="line">An independent co-signer for crypto wallets. Unusual withdrawals run in an isolated sandbox before anything is signed.</p>
+    <p class="built"><i></i>Built on Vultr Serverless Inference + Cloud Compute</p>
+  </div>
+  <div class="shot" role="img" aria-label="The Fail Closed console: a delegation drain blocked, nothing signed">
+    <div class="chrome"><i></i><i></i><i></i><span class="url"></span></div>
+    <div class="ui"></div>
+  </div>
+</body>
+</html>

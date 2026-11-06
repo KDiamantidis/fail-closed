@@ -7,7 +7,9 @@ Before anything is signed, an AI agent runs the request in an isolated sandbox o
 
 Built for the **Vultr Agent Rush** hackathon on lablab.ai, **Challenge 1: Blast Radius Zero** (3–8 November 2026).
 
-![Architecture](docs/architecture.png)
+![Fail Closed: no approval, no signature](docs/brand/cover-1280x720.png)
+
+![Architecture](docs/brand/architecture.png)
 
 ---
 

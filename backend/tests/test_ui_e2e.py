@@ -235,6 +235,13 @@ def test_ui_console(server, browser, viewport):
     assert_level(page, 2, "High: 1 wallet paused")
     no_hscroll(page)
     shot(page, f"{viewport}-delegation-drain-detail", full=viewport == "phone")
+    if viewport == "desktop" and os.environ.get("FC_SCREENSHOTS") == "1":
+        # the crop on the submission cover (docs/brand/cover.html): 1000 px wide, so no sidebar
+        page.set_viewport_size({"width": 1000, "height": 620})
+        page.evaluate("window.scrollTo(0, 0)")
+        page.wait_for_timeout(400)
+        page.screenshot(path=str(REPO / "docs" / "brand" / "cover-ui.png"))
+        page.set_viewport_size(VIEWPORTS["desktop"])
     go(page, "/overview")
     assert kpi.get_attribute("data-level") == "2" and page.locator('[data-testid="kpi-risk-name"]').inner_text() == "High"
     no_hscroll(page)

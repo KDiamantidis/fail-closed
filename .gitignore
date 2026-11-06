@@ -37,3 +37,6 @@ frontend/dist/
 # Playwright MCP scratch and TypeScript build cache
 .playwright-mcp/
 frontend/tsconfig.tsbuildinfo
+
+# brand previews (docs/brand/export.py)
+docs/brand/preview-*.png

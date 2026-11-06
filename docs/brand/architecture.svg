@@ -1,0 +1,153 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img"
+     aria-labelledby="t d" font-family="Inter, system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <title id="t">Fail Closed architecture</title>
+  <desc id="d">An untrusted withdrawal service sends a signing request to the Guard on one Vultr Cloud Compute VM.
+    Plain transfers take the fast path (fixed rules), anything else runs in an isolated sandbox. The rule engine
+    decides; only an ALLOW gets a signed Guard approval, and the signer signs only with a valid approval. Vultr
+    Serverless Inference explains and may escalate to the sandbox, but never decides. A blocked request gets no
+    approval and no signature.</desc>
+  <style>
+    @font-face { font-family: "Inter"; font-weight: 400; src: url("fonts/inter-latin-400-normal.woff2"); }
+    @font-face { font-family: "Inter"; font-weight: 500; src: url("fonts/inter-latin-500-normal.woff2"); }
+    @font-face { font-family: "Inter"; font-weight: 600; src: url("fonts/inter-latin-600-normal.woff2"); }
+    @font-face { font-family: "Inter"; font-weight: 700; src: url("fonts/inter-latin-700-normal.woff2"); }
+    .box { fill: #ffffff; stroke: #d0d5dd; stroke-width: 1.5; }
+    .key { fill: #ecfdf8; stroke: #0f766e; stroke-width: 2; }
+    .bad { fill: #fef3f2; stroke: #b42318; stroke-width: 2; }
+    .h { font-size: 21px; font-weight: 600; fill: #101828; }
+    .s { font-size: 16px; font-weight: 400; fill: #475467; }
+    .sm { font-size: 14.5px; font-weight: 500; fill: #667085; }
+    .cap { font-size: 15px; font-weight: 600; fill: #667085; letter-spacing: 0.06em; }
+    .flow { stroke: #344054; stroke-width: 2.2; fill: none; }
+    .allow { stroke: #0f766e; stroke-width: 2.6; fill: none; }
+    .red { stroke: #b42318; stroke-width: 2.6; fill: none; }
+    .ai { stroke: #0f766e; stroke-width: 2; fill: none; stroke-dasharray: 7 6; }
+    .boundary { fill: none; stroke: #98a2b3; stroke-width: 1.8; stroke-dasharray: 9 7; }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#344054"/></marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#0f766e"/></marker>
+    <marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#b42318"/></marker>
+  </defs>
+
+  <rect width="1600" height="900" fill="#f6f7f9"/>
+
+  <!-- title -->
+  <text x="40" y="58" font-size="30" font-weight="700" fill="#101828" letter-spacing="-0.5">Fail Closed: how a signing request is checked</text>
+  <text x="40" y="88" class="s">No approval, no signature. Fixed rules decide; the AI only explains.</text>
+
+  <!-- Vultr Serverless Inference (outside the VM) -->
+  <rect x="660" y="112" width="440" height="78" rx="12" class="box"/>
+  <text x="684" y="144" class="h">Vultr Serverless Inference</text>
+  <text x="684" y="172" class="s">glm-5.3-flash checks · glm-5.3 explanations</text>
+
+  <!-- the VM -->
+  <rect x="250" y="232" width="1320" height="600" rx="18" fill="#ffffff" fill-opacity="0.55" stroke="#0f766e" stroke-width="2"/>
+  <text x="274" y="266" class="cap">VULTR CLOUD COMPUTE (ONE VM)</text>
+
+  <!-- untrusted side + trust boundary -->
+  <rect x="34" y="404" width="180" height="104" rx="12" class="box"/>
+  <text x="52" y="438" class="h">Withdrawal</text>
+  <text x="52" y="462" class="h">service</text>
+  <rect x="52" y="476" width="112" height="22" rx="11" fill="#fef3f2" stroke="#fecdca"/>
+  <text x="108" y="492" text-anchor="middle" font-size="13" font-weight="700" fill="#b42318" letter-spacing="0.08em">UNTRUSTED</text>
+  <line x1="232" y1="300" x2="232" y2="860" class="boundary"/>
+  <text x="226" y="880" text-anchor="end" class="sm">trust boundary</text>
+
+  <!-- Caddy -->
+  <rect x="276" y="410" width="132" height="92" rx="12" class="box"/>
+  <text x="296" y="446" class="h">Caddy</text>
+  <text x="296" y="472" class="s">HTTPS</text>
+
+  <!-- Guard API -->
+  <rect x="440" y="396" width="168" height="120" rx="12" class="key"/>
+  <text x="460" y="432" class="h">Guard API</text>
+  <text x="460" y="458" class="s">decode, check</text>
+  <text x="460" y="480" class="s">rules, choose</text>
+  <text x="460" y="502" class="s">the path</text>
+
+  <!-- fast path -->
+  <rect x="648" y="296" width="262" height="86" rx="12" class="box"/>
+  <text x="668" y="330" class="h">Fast path</text>
+  <text x="668" y="358" class="s">plain transfer, fixed rules, ms</text>
+
+  <!-- slow path: the sandbox (its own boundary) -->
+  <rect x="648" y="420" width="262" height="196" rx="12" class="box"/>
+  <rect x="640" y="412" width="278" height="212" rx="16" class="boundary"/>
+  <text x="668" y="454" class="h">Slow path: sandbox</text>
+  <text x="668" y="482" class="s">Docker + Anvil</text>
+  <text x="668" y="506" class="s">no network, read-only</text>
+  <text x="668" y="530" class="s">512 MB, 1 CPU, no secrets</text>
+  <text x="668" y="554" class="s">new or reset per check</text>
+  <text x="668" y="596" class="sm">what would really happen</text>
+
+  <!-- rule engine + breaker -->
+  <rect x="938" y="400" width="176" height="112" rx="12" class="key"/>
+  <text x="958" y="436" class="h">Rule engine</text>
+  <text x="958" y="464" class="s">decides:</text>
+  <text x="958" y="488" class="s">allow / hold / block</text>
+
+  <rect x="938" y="562" width="176" height="152" rx="12" class="box"/>
+  <text x="958" y="596" class="h">Circuit breaker</text>
+  <circle cx="966" cy="620" r="6" fill="#dc6803"/><text x="980" y="625" class="s">1 freeze address</text>
+  <circle cx="966" cy="644" r="6" fill="#e62e05"/><text x="980" y="649" class="s">2 pause wallet</text>
+  <circle cx="966" cy="668" r="6" fill="#d92d20"/><text x="980" y="673" class="s">3 safe mode</text>
+  <circle cx="966" cy="692" r="6" fill="#7a271a"/><text x="980" y="697" class="s">4 global stop</text>
+
+  <!-- approval + signer -->
+  <rect x="1150" y="400" width="186" height="112" rx="12" class="key"/>
+  <text x="1170" y="436" class="h">Guard approval</text>
+  <text x="1170" y="464" class="s">signed, ed25519,</text>
+  <text x="1170" y="488" class="s">bound to the request</text>
+
+  <rect x="1372" y="400" width="176" height="132" rx="12" class="box"/>
+  <text x="1392" y="436" class="h">Signer</text>
+  <text x="1392" y="464" class="s">mock HSM / MPC</text>
+  <text x="1392" y="490" class="s">signs only with a</text>
+  <text x="1392" y="514" class="s">valid approval</text>
+
+  <!-- the blocked request (red path) -->
+  <rect x="1150" y="586" width="398" height="92" rx="12" class="bad"/>
+  <text x="1172" y="622" font-size="21" font-weight="700" fill="#b42318">Blocked: no approval</text>
+  <text x="1172" y="652" font-size="18" font-weight="600" fill="#912018">→ no signature</text>
+
+  <!-- storage + UI -->
+  <rect x="276" y="700" width="132" height="84" rx="12" class="box"/>
+  <text x="296" y="736" class="h">Web UI</text>
+  <text x="296" y="762" class="s">console</text>
+  <rect x="440" y="700" width="168" height="84" rx="12" class="box"/>
+  <text x="460" y="736" class="h">SQLite</text>
+  <text x="460" y="762" class="s">history, holds</text>
+
+  <!-- flows -->
+  <path d="M214 456 H268" class="flow" marker-end="url(#a)"/>
+  <path d="M408 456 H432" class="flow" marker-end="url(#a)"/>
+  <path d="M608 430 C628 430 628 339 640 339" class="flow" marker-end="url(#a)"/>
+  <path d="M608 482 C624 482 624 518 632 518" class="flow" marker-end="url(#a)"/>
+  <path d="M910 339 C926 339 920 430 930 430" class="flow" marker-end="url(#a)"/>
+  <path d="M918 518 C926 518 922 480 930 480" class="flow" marker-end="url(#a)"/>
+  <path d="M1114 440 H1142" class="allow" marker-end="url(#g)"/>
+  <text x="1132" y="390" text-anchor="middle" font-size="13" font-weight="700" fill="#0f766e">ALLOW</text>
+  <path d="M1336 456 H1364" class="allow" marker-end="url(#g)"/>
+  <path d="M1026 512 V554" class="flow" marker-end="url(#a)"/>
+  <path d="M1114 486 C1132 486 1128 630 1142 630" class="red" marker-end="url(#r)"/>
+  <text x="1150" y="576" font-size="13" font-weight="700" fill="#b42318">BLOCK</text>
+  <path d="M342 502 V692" class="flow" marker-end="url(#a)" marker-start="url(#a)"/>
+  <path d="M524 516 V692" class="flow" marker-end="url(#a)"/>
+
+  <!-- AI: dashed, advice only -->
+  <path d="M880 190 V288" class="ai" marker-end="url(#g)"/>
+  <text x="896" y="216" font-size="16" font-weight="600" fill="#0f766e">explains, may escalate to sandbox, never decides</text>
+
+  <!-- legend -->
+  <g transform="translate(1186 742)">
+    <rect width="362" height="76" rx="10" fill="#ffffff" stroke="#e4e7ec"/>
+    <path d="M18 24 H58" class="flow" marker-end="url(#a)"/><text x="68" y="29" class="sm">request flow</text>
+    <path d="M190 24 H230" class="ai" marker-end="url(#g)"/><text x="240" y="29" class="sm">AI advice</text>
+    <path d="M18 54 H58" class="red" marker-end="url(#r)"/><text x="68" y="59" class="sm">blocked</text>
+    <path d="M190 54 H230" class="boundary"/><text x="240" y="59" class="sm">trust boundary</text>
+  </g>
+</svg>
