@@ -1,7 +1,7 @@
 {
   "name": "g_coordinated_breaker",
   "title": "(g) Coordinated attack on several wallets and chains (breaker levels 1-4)",
-  "description": "A multi-chain drain to one address freezes it (level 1). Four hot wallets are asked to delegate to a sweeper; each is paused (level 2). Two paused wallets on chain 1 put chain 1 in safe mode (level 3): a normal withdrawal there needs a human. Two more on chain 10 put chain 10 in safe mode too: two independent signals trigger the global stop (level 4), and even a normal withdrawal on another chain is blocked. An ops lead reviews and resets, and normal service resumes.",
+  "description": "A multi-chain drain to one address freezes it (level 1). Four hot wallets are asked to delegate to a sweeper; each is paused (level 2). Two paused wallets on chain 1 put chain 1 in safe mode (level 3): a normal withdrawal there needs a human. Two more on chain 10 put chain 10 in safe mode too: two independent signals trigger the global stop (level 4), and even a normal withdrawal on another chain is blocked. The replay stops there: lifting the global stop is an operator action (admin token), which returns this replay to level 0.",
   "labels": {
     "0x1000000000000000000000000000000000000701": "hot wallet 1",
     "0x1000000000000000000000000000000000000706": "hot wallet 6 (customers)",
@@ -288,62 +288,6 @@
         "rules": [
           "F4"
         ]
-      },
-      "request": {
-        "wallet_type": "customer_hot",
-        "chain_id": 137,
-        "from": "0x1000000000000000000000000000000000000706",
-        "to": "0xc000000000000000000000000000000000000702",
-        "data": "0x",
-        "value": "1000000000000000000"
-      }
-    },
-    {
-      "t": 660,
-      "label": "ops lead lifts the global stop after review",
-      "plain": "Operator lifts the global stop after review",
-      "action": "reset_global",
-      "actor": "ops-lead",
-      "expect": {
-        "global_stop": false,
-        "safe_mode_chains": [
-          1,
-          10
-        ]
-      }
-    },
-    {
-      "t": 720,
-      "label": "ops lead ends safe mode on chain 1",
-      "plain": "Operator ends safe mode on chain 1",
-      "action": "reset_safe_mode",
-      "target": 1,
-      "actor": "ops-lead",
-      "expect": {
-        "safe_mode_chains": [
-          10
-        ]
-      }
-    },
-    {
-      "t": 780,
-      "label": "ops lead ends safe mode on chain 10",
-      "plain": "Operator ends safe mode on chain 10",
-      "action": "reset_safe_mode",
-      "target": 10,
-      "actor": "ops-lead",
-      "expect": {
-        "safe_mode_chains": [],
-        "global_stop": false
-      }
-    },
-    {
-      "t": 840,
-      "label": "normal customer withdrawal on chain 137 after the reset",
-      "plain": "Ordinary payout after the reset",
-      "expect": {
-        "verdict": "ALLOW",
-        "path": "slow"
       },
       "request": {
         "wallet_type": "customer_hot",

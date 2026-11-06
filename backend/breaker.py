@@ -108,6 +108,36 @@ class Breaker:
     def reset_global(self, actor: str, now: float) -> bool:
         return self.history.clear_global_stop(actor=actor, now=now)
 
+    def reset_all(self, actor: str, now: float) -> list[str]:
+        """Back to level 0: lift the global stop, end every safe mode, unpause every wallet,
+        unfreeze every destination. Each reset is logged with who did it. Returns what was reset."""
+        done: list[str] = []
+        if self.reset_global(actor, now):
+            done.append("global stop lifted")
+        for m in self.history.safe_modes():
+            if self.reset_safe_mode(m["chain_id"], actor, now):
+                done.append(f"safe mode ended on chain {m['chain_id']}")
+        for w in self.history.paused():
+            if self.reset_wallet(w["wallet"], actor, now):
+                done.append(f"wallet {w['wallet']} unpaused")
+        for f in self.history.frozen():
+            if self.reset_destination(f["address"], actor, now):
+                done.append(f"destination {f['address']} unfrozen")
+        return done
+
     def state(self) -> dict[str, Any]:
         return {"frozen_destinations": self.history.frozen(), "paused_wallets": self.history.paused(),
                 "safe_mode_chains": self.history.safe_modes(), "global_stop": self.history.global_stop()}
+
+
+def level_of(state: dict[str, Any]) -> int:
+    """0 normal, 1 a destination frozen, 2 a wallet paused, 3 a chain in safe mode, 4 global stop."""
+    if state.get("global_stop"):
+        return 4
+    if state.get("safe_mode_chains"):
+        return 3
+    if state.get("paused_wallets"):
+        return 2
+    if state.get("frozen_destinations"):
+        return 1
+    return 0

@@ -154,3 +154,34 @@ def test_scenario_g_climbs_1_2_3_4_and_recovers(tmp_path):
             continue
         res = g.check(r.tx(), now=now)
         assert expect_status(r, res, g.history) == "OK", (r.label, res.verdict.reasons)
+    # the replay ends at the global stop; an admin reset brings everything back to level 0
+    from breaker import level_of
+
+    assert level_of(g.breaker.state()) == 4
+    done = g.breaker.reset_all(actor="ops-lead", now=NOW + 900)
+    assert done[0] == "global stop lifted" and any("safe mode ended" in d for d in done)
+    assert g.breaker.state() == {"frozen_destinations": [], "paused_wallets": [], "safe_mode_chains": [],
+                                 "global_stop": None}
+    after = g.check(TxRequest.model_validate({
+        "wallet_type": "customer_hot", "chain_id": 137, "from": "0x1000000000000000000000000000000000000706",
+        "to": "0xc000000000000000000000000000000000000702", "value": 10**18}), now=NOW + 960)
+    assert after.verdict.verdict is Decision.ALLOW
+    assert all(e["actor"] == "ops-lead" for e in g.history.events() if e.get("kind", "").startswith("reset"))
+
+
+def test_replay_reports_the_level_step_by_step_and_admin_lifts_it(tmp_path):
+    c, _ = client(tmp_path, runner=FakeRunner())
+    run_id = "risklevel01"
+    out = c.post(f"/scenarios/g_coordinated_breaker/run?run_id={run_id}").json()
+    assert out["breaker"]["global_stop"]  # the replay stops at the global stop
+    levels = [e["data"]["level"] for e in c.get(f"/events?run_id={run_id}").json() if e["type"] == "breaker_state"]
+    assert levels == sorted(levels) and levels[-1] == 4 and {0, 1, 2, 3} <= set(levels)  # one per step
+    # lifting it is still an admin action, even in a visitor's own replay
+    assert c.post(f"/demo/{run_id}/breaker/reset-all").status_code == 401
+    assert c.post(f"/demo/{run_id}/breaker/reset-all", headers={"x-admin-token": "wrong"}).status_code == 403
+    r = c.post(f"/demo/{run_id}/breaker/reset-all", headers={"x-admin-token": ADMIN}).json()
+    assert r["level"] == 0 and r["reset"][0] == "global stop lifted"
+    assert c.get("/status").json()["breaker_level"] == 0  # the main state was never touched
+    assert c.post("/breaker/reset-all", headers={"x-admin-token": ADMIN}).json() == {
+        "reset": [], "breaker": {"frozen_destinations": [], "paused_wallets": [], "safe_mode_chains": [],
+                                 "global_stop": None}, "level": 0}

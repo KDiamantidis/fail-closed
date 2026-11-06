@@ -39,7 +39,7 @@ from pydantic import BaseModel, model_validator
 from app.config import REPO_ROOT, Settings, get_settings
 from app.models import TxRequest
 from approval import Approval, Approver, GuardKey, request_hash
-from breaker import Breaker
+from breaker import Breaker, level_of
 from events import EventBus
 from guard import CheckResult, Guard
 from history import History
@@ -242,9 +242,7 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.get("/status")
     def status() -> dict:
         """For the UI header: what is running, and the main breaker level (0-4)."""
-        st = svc.breaker.state()
-        level = (4 if st["global_stop"] else 3 if st["safe_mode_chains"] else 2 if st["paused_wallets"]
-                 else 1 if st["frozen_destinations"] else 0)
+        level = level_of(svc.breaker.state())
         return {"sandbox_mode": svc.settings.sandbox_mode, "llm": "MOCK" if svc.guard.explainer.mode == "mock"
                 else "REAL" if svc.guard.explainer.mode == "live" else "OFF", "model": svc.settings.vultr_model,
                 "breaker_level": level, "redteam_public": svc.settings.redteam_public,
@@ -465,6 +463,15 @@ def create_app(services: Services | None = None) -> FastAPI:
             target = {"global_stop": True}
         return {"reset": ok, **target, "detail": "reset and logged" if ok else "nothing to reset"}
 
+    @app.post("/breaker/reset-all")
+    def reset_all(x_admin_token: str | None = Header(default=None)) -> dict:
+        """Back to level 0 Normal (admin): lift the global stop, end safe modes, unpause wallets,
+        unfreeze destinations. Every reset is logged."""
+        require_admin(x_admin_token)
+        done = svc.breaker.reset_all(actor="api-admin", now=time.time())
+        st = svc.breaker.state()
+        return {"reset": done, "breaker": st, "level": level_of(st)}
+
     @app.get("/events")
     def events(after: int = 0, check_id: str | None = None, run_id: str | None = None) -> list[dict]:
         return svc.bus.since(after, check_id, run_id)
@@ -541,13 +548,17 @@ def create_app(services: Services | None = None) -> FastAPI:
                     done = r.apply(iso.breaker, time.time())
                     iso.publish("-", "human_action", {"action": r.action, "target": r.target, "by": r.actor,
                                                       "done": done})
-                    results.append({"label": r.label, "plain": r.plain or r.label, "expect": r.expect.model_dump(), "action": r.action,
-                                    "target": r.target, "by": r.actor, "done": done,
-                                    "breaker": iso.breaker.state()})
+                    st = iso.breaker.state()
+                    results.append({"label": r.label, "plain": r.plain or r.label, "expect": r.expect.model_dump(),
+                                    "action": r.action, "target": r.target, "by": r.actor, "done": done,
+                                    "breaker": st})
+                    iso.publish("-", "breaker_state", {**st, "level": level_of(st)})
                     continue
                 out = iso.withdraw(r.tx())
-                results.append({"label": r.label, "plain": r.plain or r.label, "expect": r.expect.model_dump(), **out,
-                                "breaker_state": iso.breaker.state()})
+                st = iso.breaker.state()
+                results.append({"label": r.label, "plain": r.plain or r.label, "expect": r.expect.model_dump(),
+                                **out, "breaker_state": st})
+                iso.publish("-", "breaker_state", {**st, "level": level_of(st)})  # the UI colour, step by step
         except GuardBusy as e:
             raise HTTPException(status_code=503, detail=f"Guard busy: {e}. Nothing was approved or signed.")
         # Demo: fast-forward the clock past the DELAY so the visitor sees what the worker decides.
@@ -565,6 +576,17 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.get("/demo/{run_id}/pending")
     def demo_pending(run_id: str) -> list[dict]:
         return svc.demo(run_id).history.held("pending", "needs_human")
+
+    @app.post("/demo/{run_id}/breaker/reset-all")
+    def demo_reset_all(run_id: str, x_admin_token: str | None = Header(default=None)) -> dict:
+        """Lift a replay's breaker back to level 0 (the level-4 banner's action). Still an admin
+        action: the admin token is needed, even in a visitor's own replay."""
+        require_admin(x_admin_token)
+        iso = svc.demo(run_id)
+        done = iso.breaker.reset_all(actor="api-admin", now=time.time())
+        st = iso.breaker.state()
+        iso.publish("-", "breaker_state", {**st, "level": level_of(st)})
+        return {"reset": done, "breaker": st, "level": level_of(st)}
 
     @app.post("/demo/{run_id}/pending/{hold_id}/{decision}")
     def demo_decide(run_id: str, hold_id: str, decision: str) -> dict:
