@@ -78,6 +78,8 @@ class Settings(BaseSettings):
     # Which local proxy may tell us the visitor's IP (per-IP limits): "caddy" (X-Forwarded-For, the
     # VM), "cloudflared" (CF-Connecting-IP, Plan B) or "none". Only for requests from 127.0.0.1.
     trusted_proxy: str = "caddy"
+    # Where the demo runs, for the page footer: "vm" (Vultr Cloud Compute) or "laptop" (Plan B).
+    deploy_target: str = "vm"
 
     # Sandbox: fresh container per check, always destroyed.
     sandbox_image: str = "fail-closed-sandbox:foundry-v1.8.5"

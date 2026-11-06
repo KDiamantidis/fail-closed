@@ -88,6 +88,9 @@ set_env SIGNER_DB "$DATA/signer.sqlite3"
 set_env SANDBOX_MODE warm
 set_env REDTEAM_PUBLIC false
 set_env PUBLIC_DEMO true
+set_env DEPLOY_TARGET vm
+set_env TRUSTED_PROXY caddy
+set_env LIVE_UPDATES sse
 set_env LLM_DAILY_BUDGET_USD 1
 set_env LLM_BUDGET_FILE "$DATA/llm_budget.json"
 set_env CORS_ORIGINS "[\"https://$DOMAIN\"]"

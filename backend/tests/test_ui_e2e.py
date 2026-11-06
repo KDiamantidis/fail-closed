@@ -83,7 +83,7 @@ def server():
 @pytest.fixture(scope="module")
 def poll_server():
     """Like Plan B behind a Cloudflare quick tunnel: public demo, updates by polling only."""
-    base, proc = run_server({"LIVE_UPDATES": "poll", "PUBLIC_DEMO": "true"})
+    base, proc = run_server({"LIVE_UPDATES": "poll", "PUBLIC_DEMO": "true", "DEPLOY_TARGET": "laptop"})
     yield base
     proc.terminate()
     proc.wait(timeout=10)
@@ -389,6 +389,9 @@ def test_forced_polling_shows_every_live_update(poll_server, browser, viewport):
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     calls = follow_without_sse(page, poll_server)
+    assert page.locator('[data-testid="vultr-footer"]').inner_text() == (
+        "AI runs on Vultr Serverless Inference. Guard and sandboxes run on the demo laptop "
+        "(Vultr VM blocked by account review).")
     replay(page, "d_delegation_drain")
     assert page.locator('[data-testid="live-status"]').inner_text() in ("Updates every 2 s", "Updates delayed, retrying…")
     open_first_request(page)

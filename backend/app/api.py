@@ -342,6 +342,7 @@ def create_app(services: Services | None = None) -> FastAPI:
                 "delay_minutes": svc.settings.delay_minutes,
                 "public_demo": svc.settings.public_demo,
                 "live_updates": svc.settings.live_updates,
+                "deploy_target": svc.settings.deploy_target,
                 "demo_idle_reset_minutes": svc.settings.demo_idle_reset_minutes,
                 "llm_budget": getattr(svc.guard.explainer, "budget", None).snapshot()
                 if getattr(svc.guard.explainer, "budget", None) is not None else None}

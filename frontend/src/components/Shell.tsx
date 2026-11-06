@@ -30,7 +30,10 @@ function Logo() {
   );
 }
 
-const VULTR_LINE = "Runs on Vultr: Serverless Inference (AI) · Cloud Compute (Guard + sandboxes)";
+const VULTR_LINE = {
+  vm: "Runs on Vultr: Serverless Inference (AI) · Cloud Compute (Guard + sandboxes)",
+  laptop: "AI runs on Vultr Serverless Inference. Guard and sandboxes run on the demo laptop (Vultr VM blocked by account review).",
+};
 
 function aiChip(status: Status | null): string {
   if (!status) return "AI: …";
@@ -122,14 +125,14 @@ export function Shell({ children }: { children: ReactNode }) {
           </nav>
           <div className="mt-auto space-y-2 rounded-lg border border-border bg-subtle p-3 text-[12px] text-muted">
             <p>Demo environment. Every replay runs on its own isolated state, on a local test chain.</p>
-            <p data-testid="vultr-sidebar">{VULTR_LINE}</p>
+            <p data-testid="vultr-sidebar">{VULTR_LINE[status?.deploy_target === "laptop" ? "laptop" : "vm"]}</p>
           </div>
         </aside>
         </div>
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="mx-auto max-w-[1180px]"><DemoNotice /><GlobalStopBanner />{children}</div>
           <footer className="mx-auto mt-12 flex max-w-[1180px] flex-wrap items-center justify-between gap-3 border-t border-border pt-5 text-[13px] text-muted">
-            <span>Fail Closed · No approval, no signature.<span className="block text-[12px]" data-testid="vultr-footer">{VULTR_LINE}</span></span>
+            <span>Fail Closed · No approval, no signature.<span className="block text-[12px]" data-testid="vultr-footer">{VULTR_LINE[status?.deploy_target === "laptop" ? "laptop" : "vm"]}</span></span>
             <span className="flex gap-4">
               <a href="https://github.com/KDiamantidis/fail-closed" target="_blank" rel="noreferrer">GitHub</a>
               <a href="https://github.com/KDiamantidis/fail-closed#how-it-works" target="_blank" rel="noreferrer">How it works</a>
