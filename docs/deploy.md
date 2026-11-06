@@ -163,6 +163,8 @@ earlier rehearsal went down to 1.14 GB).
    `notepad .env`, paste it after `ADMIN_TOKEN=`, save. Keep it somewhere safe.
 3. **Start:** `.\deploy\planb.ps1 start`. It prints `RUNNING: http://127.0.0.1:8000`.
    Open that address once and run replay (d) to warm it up.
+   Then `.\deploy\planb.ps1 redteam` (1–2 minutes): it runs the containment check once with the
+   admin token from `.env` (never printed), so the Containment page shows "All 7 checks contained".
 4. **Install cloudflared** (once): `winget install --id Cloudflare.cloudflared`, then open a new
    terminal and check `cloudflared --version`. (Or the `.msi` from
    github.com/cloudflare/cloudflared/releases.)

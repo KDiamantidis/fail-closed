@@ -39,6 +39,9 @@ check() {  # check <label> <value>
   echo "$label: files $n, journal lines $j, Caddy log lines $c"
   [ "$n" = 0 ] && [ "$j" = 0 ] && [ "$c" = 0 ] || found=1
 }
+echo "-- save a red-team report for the Containment page (admin action, token read here, never printed)"
+curl -fsS -o /dev/null --max-time 600 -X POST -H @<(printf 'X-Admin-Token: %s\n' "$TOK") -H "Accept: text/event-stream"   127.0.0.1:8000/redteam/run && curl -fsS 127.0.0.1:8000/redteam/last | python3 -c   'import json,sys; r=json.load(sys.stdin); print("Containment page report:", sum(x["contained"] for x in r["results"]), "of", len(r["results"]), "contained")'
+
 check "Vultr key" "$KEY"
 check "admin token" "$TOK"
 unset KEY TOK

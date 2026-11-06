@@ -1,0 +1,78 @@
+# lablab.ai submission text
+
+Copy each part into the matching field. Facts about the real incidents come only from the README
+"Motivation" section and its sources. Measured numbers say where they were measured.
+
+## Project title
+
+Fail Closed
+
+## Short description (max ~150 characters)
+
+An independent co-signer for crypto wallets: unusual withdrawals run in an isolated sandbox before anything is signed.
+
+(118 characters)
+
+## Long description (about 500 words with your "where it runs" line)
+
+**The problem.** In October and November 2026, two exchanges lost funds through signatures that
+were valid but should never have been made. At Binance, about $6.3 billion left hot wallets on
+about 10 blockchains. One Ethereum transaction carried 50 EIP-7702 authorizations for 50
+consecutive nonces; one matched and handed a hot wallet to the attacker's contract (Blockaid).
+Binance says it found no evidence of a private key leak; the investigation is ongoing. At
+Mercado Bitcoin, about $38–49M (estimates vary) left through plain transfers to attacker
+addresses on at least 10 chains. Both exchanges then paused withdrawals for all customers.
+Fail Closed is designed to reject this class of attack. We do not claim it would have stopped
+these incidents.
+
+**The idea.** No approval, no signature. Fail Closed sits between the withdrawal service and the
+signer. The signer signs only with a Guard approval bound to the exact request. The Guard checks
+what a signature will do, not who asks for it.
+
+**How it works.** Plain payouts to known customers are approved by fixed rules in milliseconds.
+Everything unusual (a new destination, EIP-7702, contract calls, large amounts) runs first in an
+isolated sandbox: Docker and Anvil, no network, read-only, 512 MB, 1 CPU, no secrets. The rules
+read the state diff and decide: allow, delay, needs review or block. Any error, timeout or empty
+result means block. A scoped circuit breaker stops as little as possible: one address, one wallet
+or one chain; everything only with two independent signals. The AI explains each decision in
+plain words and may ask for a deeper check. It never decides.
+
+**What runs on Vultr.** Vultr Serverless Inference runs the AI: glm-5.3-flash for the fast check
+of large amounts, glm-5.3 for the explanation card. [WHERE: choose one line below.]
+
+**Measured results.** On a laptop (Windows 11, Docker Desktop, 6 Nov 2026), with 500 normal
+withdrawals and 1 hidden attack: the attack was stopped in all 4 setups and 0 of 500 normal
+customers were refused. Fast path median 3 ms (warm setup); full sandbox check median 1.3 s (warm)
+or 2.4 s (fresh). A short run with the real Vultr models (49 + 1) stopped the attack with 0 refused
+and 0 rate limits. The red team ran hostile code inside the sandbox: 7 of 7 contained. In our model
+comparison, glm-5.3-flash answered 24 of 24 checks within 2 s.
+
+**Where it fits.** Pre-signing screening products and signer hooks already exist. The hooks give
+the enforcement point; the customer writes the decision logic. Fail Closed is a prototype of that
+decision logic.
+
+**Honest limits.** A hackathon prototype on a local test chain with fake funds. It does not stop
+the first break-in; it stops that break-in from getting a signature. If an attacker takes over the
+Guard or its key, the protection is gone. [LIMITS: choose one line below.]
+
+**What's next.** Plug into one real signer hook; check every signature against an approved
+withdrawal in the exchange ledger; deny unknown operation types (for example EIP-7702 delegation)
+on withdrawal wallets; rules for deposit-address sweeps.
+
+### Where it runs: pick ONE
+
+- **[WHERE] if the VM worked:** Vultr Cloud Compute runs the Guard, the sandboxes and the web app on one VM.
+- **[WHERE] if Plan B:** The Vultr VM was blocked by account review before the deadline, so the demo runs on the laptop; the AI still runs on Vultr Serverless Inference.
+- **[LIMITS] if the VM worked:** All measured numbers above come from a laptop; the VM runs the live demo.
+- **[LIMITS] if Plan B:** The Vultr VM was blocked by account review, so the demo and all numbers are from a laptop.
+
+## Technologies
+
+Python, FastAPI, Pydantic, Docker (rootless on the VM), Foundry Anvil (Prague hardfork), EIP-7702,
+SQLite, ed25519 approvals, React, Vite, Tailwind CSS, Server-Sent Events with polling fallback,
+Playwright, Caddy (VM) or Cloudflare Tunnel (Plan B), Vultr Serverless Inference (glm-5.3-flash,
+glm-5.3), Vultr Cloud Compute.
+
+## Tags
+
+AI agents, security, crypto, wallets, EIP-7702, sandbox, Vultr, Blast Radius Zero

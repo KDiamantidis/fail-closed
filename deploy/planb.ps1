@@ -8,6 +8,7 @@
   .\deploy\planb.ps1 status         # what runs, sandbox count, free RAM, today's AI spend
   .\deploy\planb.ps1 stop           # stop the API and remove every Plan B sandbox container
   .\deploy\planb.ps1 start -Rehearsal   # local test without ADMIN_TOKEN (admin actions disabled)
+  .\deploy\planb.ps1 redteam      # run the containment check once, so the Containment page shows it
 
   Same settings as the VM: PUBLIC_DEMO=true, the same per-IP limits, a $1/day AI budget, the AI on
   Vultr Serverless Inference (LLM_MODE=live: no key = AI off, never the mock), warm sandbox pool.
@@ -17,7 +18,7 @@
   never prints them.
 #>
 param(
-  [Parameter(Position = 0, Mandatory = $true)][ValidateSet("start", "stop", "status")][string]$Command,
+  [Parameter(Position = 0, Mandatory = $true)][ValidateSet("start", "stop", "status", "redteam")][string]$Command,
   [switch]$Rehearsal,
   [int]$Port = 8000,
   [double]$MinFreeGB = 2.0
@@ -171,8 +172,27 @@ function Status-PlanB {
   Write-Host "free RAM: $(Free-GB) GB"
 }
 
+function Redteam-PlanB {
+  if (-not (Api-Pid)) { Fail "the API is not running. Start it first: .\deploy\planb.ps1 start" }
+  if ((Env-Length "ADMIN_TOKEN") -lt 32) { Fail "ADMIN_TOKEN is not set in .env (the red team is an admin action)." }
+  # the token is read here and sent once in a header; it is never printed
+  $line = Get-Content (Join-Path $Repo ".env") | Where-Object { $_ -match "^ADMIN_TOKEN=" } | Select-Object -First 1
+  $headers = @{ "X-Admin-Token" = $line.Substring("ADMIN_TOKEN=".Length).Trim(); "Accept" = "text/event-stream" }
+  Write-Host "running the red team (about 1-2 minutes)..."
+  try {
+    $r = Invoke-WebRequest -Method Post -Uri "$Url/redteam/run" -Headers $headers -TimeoutSec 600 -UseBasicParsing
+  } catch { Fail "the red team did not run: $($_.Exception.Message)" }
+  finally { $headers = $null; $line = $null }
+  $last = Invoke-RestMethod "$Url/redteam/last" -TimeoutSec 10
+  if ($last.available) {
+    $n = @($last.results | Where-Object { $_.contained }).Count
+    Write-Host ("red team: {0} of {1} contained; the Containment page now shows this report" -f $n, @($last.results).Count) -ForegroundColor Green
+  } else { Write-Host "no report was saved; see $Run\api.err.log" -ForegroundColor Yellow }
+}
+
 switch ($Command) {
   "start" { Start-PlanB }
   "stop" { Stop-PlanB }
   "status" { Status-PlanB }
+  "redteam" { Redteam-PlanB }
 }
