@@ -514,7 +514,8 @@ def create_app(services: Services | None = None) -> FastAPI:
         for name, path in _scenario_files().items():
             sc = load(path)
             out.append({"name": name, "title": sc.title, "description": sc.description, "labels": sc.labels,
-                        "requests": [{"label": r.label, "expect": r.expect.model_dump()} for r in sc.requests]})
+                        "requests": [{"label": r.label, "plain": r.plain or r.label, "expect": r.expect.model_dump()}
+                                     for r in sc.requests]})
         return out
 
     @app.post("/scenarios/{name}/run")
@@ -540,12 +541,12 @@ def create_app(services: Services | None = None) -> FastAPI:
                     done = r.apply(iso.breaker, time.time())
                     iso.publish("-", "human_action", {"action": r.action, "target": r.target, "by": r.actor,
                                                       "done": done})
-                    results.append({"label": r.label, "expect": r.expect.model_dump(), "action": r.action,
+                    results.append({"label": r.label, "plain": r.plain or r.label, "expect": r.expect.model_dump(), "action": r.action,
                                     "target": r.target, "by": r.actor, "done": done,
                                     "breaker": iso.breaker.state()})
                     continue
                 out = iso.withdraw(r.tx())
-                results.append({"label": r.label, "expect": r.expect.model_dump(), **out,
+                results.append({"label": r.label, "plain": r.plain or r.label, "expect": r.expect.model_dump(), **out,
                                 "breaker_state": iso.breaker.state()})
         except GuardBusy as e:
             raise HTTPException(status_code=503, detail=f"Guard busy: {e}. Nothing was approved or signed.")

@@ -1,6 +1,6 @@
 {
   "name": "g_coordinated_breaker",
-  "title": "(g) Coordinated attack on several wallets and chains: breaker level 1 -> 2 -> 3 -> 4, then admin reset",
+  "title": "(g) Coordinated attack on several wallets and chains (breaker levels 1-4)",
   "description": "A multi-chain drain to one address freezes it (level 1). Four hot wallets are asked to delegate to a sweeper; each is paused (level 2). Two paused wallets on chain 1 put chain 1 in safe mode (level 3): a normal withdrawal there needs a human. Two more on chain 10 put chain 10 in safe mode too: two independent signals trigger the global stop (level 4), and even a normal withdrawal on another chain is blocked. An ops lead reviews and resets, and normal service resumes.",
   "labels": {
     "0x1000000000000000000000000000000000000701": "hot wallet 1",
@@ -51,6 +51,7 @@
     {
       "t": 0,
       "label": "1 ETH to the attacker on chain 1",
+      "plain": "Payment to the attacker's address (chain 1)",
       "expect": {
         "verdict": "ALLOW"
       },
@@ -66,6 +67,7 @@
     {
       "t": 60,
       "label": "1 ETH to the attacker on chain 10",
+      "plain": "Payment to the attacker's address (chain 10)",
       "expect": {
         "verdict": "ALLOW"
       },
@@ -81,6 +83,7 @@
     {
       "t": 120,
       "label": "1 ETH to the attacker on chain 42161",
+      "plain": "Payment to the attacker's address (chain 42161)",
       "expect": {
         "verdict": "DELAY",
         "after_hold": "blocked"
@@ -97,6 +100,7 @@
     {
       "t": 180,
       "label": "1 ETH to the attacker on chain 137",
+      "plain": "Payment to the attacker's address (chain 137)",
       "expect": {
         "verdict": "DELAY",
         "after_hold": "blocked"
@@ -113,6 +117,7 @@
     {
       "t": 240,
       "label": "1 ETH to the attacker on chain 43114",
+      "plain": "Payment to the attacker's address (chain 43114)",
       "expect": {
         "verdict": "BLOCK",
         "rules": [
@@ -131,6 +136,7 @@
     {
       "t": 300,
       "label": "hot wallet 2 asked to delegate to the sweeper (chain 1)",
+      "plain": "Hot wallet 2 asked to hand control to the attacker's contract (chain 1)",
       "expect": {
         "verdict": "BLOCK",
         "path": "slow",
@@ -160,6 +166,7 @@
     {
       "t": 360,
       "label": "hot wallet 3 asked to delegate to the sweeper (chain 1)",
+      "plain": "Hot wallet 3 asked to hand control to the attacker's contract (chain 1)",
       "expect": {
         "verdict": "BLOCK",
         "rules": [
@@ -191,6 +198,7 @@
     {
       "t": 420,
       "label": "normal customer withdrawal on chain 1 (safe mode)",
+      "plain": "Ordinary payout while chain 1 is in safe mode",
       "expect": {
         "verdict": "NEEDS_HUMAN",
         "path": "slow",
@@ -210,6 +218,7 @@
     {
       "t": 480,
       "label": "hot wallet 4 asked to delegate to the sweeper (chain 10)",
+      "plain": "Hot wallet 4 asked to hand control to the attacker's contract (chain 10)",
       "expect": {
         "verdict": "BLOCK",
         "rules": [
@@ -240,6 +249,7 @@
     {
       "t": 540,
       "label": "hot wallet 5 asked to delegate to the sweeper (chain 10)",
+      "plain": "Hot wallet 5 asked to hand control to the attacker's contract (chain 10)",
       "expect": {
         "verdict": "BLOCK",
         "rules": [
@@ -271,6 +281,7 @@
     {
       "t": 600,
       "label": "normal customer withdrawal on chain 137 (global stop)",
+      "plain": "Ordinary payout during the global stop",
       "expect": {
         "verdict": "BLOCK",
         "path": "early",
@@ -290,6 +301,7 @@
     {
       "t": 660,
       "label": "ops lead lifts the global stop after review",
+      "plain": "Operator lifts the global stop after review",
       "action": "reset_global",
       "actor": "ops-lead",
       "expect": {
@@ -303,6 +315,7 @@
     {
       "t": 720,
       "label": "ops lead ends safe mode on chain 1",
+      "plain": "Operator ends safe mode on chain 1",
       "action": "reset_safe_mode",
       "target": 1,
       "actor": "ops-lead",
@@ -315,6 +328,7 @@
     {
       "t": 780,
       "label": "ops lead ends safe mode on chain 10",
+      "plain": "Operator ends safe mode on chain 10",
       "action": "reset_safe_mode",
       "target": 10,
       "actor": "ops-lead",
@@ -326,6 +340,7 @@
     {
       "t": 840,
       "label": "normal customer withdrawal on chain 137 after the reset",
+      "plain": "Ordinary payout after the reset",
       "expect": {
         "verdict": "ALLOW",
         "path": "slow"

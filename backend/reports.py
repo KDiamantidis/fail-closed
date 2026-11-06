@@ -6,7 +6,7 @@ from typing import Any
 from history import History
 from scenario import Scenario
 
-REAL_ATTACK_CHAINS = 10  # Mercado Bitcoin (2 Nov): the same address on 10 chains
+REAL_ATTACK_CHAINS = 10  # the multi-chain incident in README "Motivation": the same address on 10 chains
 
 
 def _units(amount: int) -> str:

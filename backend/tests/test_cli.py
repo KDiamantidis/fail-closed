@@ -50,8 +50,8 @@ def test_reset_commands(tmp_path, capsys):
 
 
 @pytest.mark.docker
-def test_binance_scenario_report(tmp_path, capsys):
-    assert main(["scenario", str(SCENARIOS / "d_binance_7702.json"), "--db", str(tmp_path / "d.sqlite3")]) == 0
+def test_delegation_drain_scenario_report(tmp_path, capsys):
+    assert main(["scenario", str(SCENARIOS / "d_delegation_drain.json"), "--db", str(tmp_path / "d.sqlite3")]) == 0
     out = capsys.readouterr().out
     assert "path    : SLOW" in out
     assert "code    : 0x -> 0xef010000000000000000000000000000000000005eeeee" in out

@@ -24,8 +24,8 @@ def holds_for(guard, when):
     return HoldManager(guard, Approver(key, 120, clock=lambda: when), MockSigner(key.public_key_hex, clock=lambda: when))
 
 
-def test_mercado_delays_are_not_released_because_the_destination_froze():
-    sc, g = neutral_guard("e_mercado_multichain")
+def test_multichain_drain_delays_are_not_released_because_the_destination_froze():
+    sc, g = neutral_guard("e_multichain_drain")
     delayed = []
     for r in sc.requests:
         g.clock = lambda r=r: NOW + r.t
@@ -62,7 +62,7 @@ def test_delay_without_a_new_signal_is_released_and_signed():
 
 def test_api_demo_run_shows_the_delay_worker_result(tmp_path):
     c, _ = client(tmp_path, runner=FakeRunner())
-    out = c.post("/scenarios/e_mercado_multichain/run").json()
+    out = c.post("/scenarios/e_multichain_drain/run").json()
     w = out["delay_worker"]["results"]
     assert len(w) == 2 and all(d["status"] == "blocked" and not d["signed"] for d in w)
 

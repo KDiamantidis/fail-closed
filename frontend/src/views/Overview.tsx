@@ -79,8 +79,8 @@ export function Overview() {
           <Card title="Incident replays" testid="replays"
             action={<span className="hidden text-[12px] text-muted sm:block">Each replay runs on its own isolated state</span>}>
             <div className="-mt-1 mb-2 space-y-1 rounded-lg bg-subtle px-3 py-2.5 text-[13px]">
-              <p><span className="font-medium text-ink">29 Oct, Binance.</span> One transaction carried 50 EIP-7702 authorizations and delegated a hot wallet to an attacker's contract.</p>
-              <p><span className="font-medium text-ink">2 Nov, Mercado Bitcoin.</span> Plain transfers: the same address on 10 chains, about 185 tokens sent one by one.</p>
+              <p><span className="font-medium text-ink">Delegation drain.</span> One signed transaction hands a hot wallet to an attacker's contract (EIP-7702), which can then empty it.</p>
+              <p><span className="font-medium text-ink">Multi-chain drain.</span> With a stolen key, plain transfers send everything to one address on many chains, token by token.</p>
             </div>
             <ul className="divide-y divide-border">{REPLAYS.filter((r) => r.featured).map(replayRow)}</ul>
             <p className="mt-4 mb-1 label">Everyday cases</p>

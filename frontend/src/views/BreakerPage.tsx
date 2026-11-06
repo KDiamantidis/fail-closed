@@ -44,7 +44,7 @@ export function BreakerPage() {
               <ul className="space-y-2 text-[13px]">
                 {resets.map((x: any, i: number) => (
                   <li key={i}>
-                    <p className="font-medium text-ink">{x.label}</p>
+                    <p className="font-medium text-ink">{x.plain ?? x.label}</p>
                     <p className="text-muted">{humanize(`${String(x.action).replace(/_/g, " ")} by ${x.by}${x.done ? "" : " (nothing to reset)"}`, labels)}</p>
                   </li>
                 ))}

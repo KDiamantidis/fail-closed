@@ -39,7 +39,8 @@ class ScenarioRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     t: float = 0.0
-    label: str
+    label: str  # technical label (CLI, "Technical detail" in the UI)
+    plain: str = ""  # plain-language label the UI shows
     request: dict[str, Any] | None = None
     action: str | None = None  # one of ACTIONS (an admin resetting the breaker)
     target: str | int | None = None  # address, wallet or chain id for the action

@@ -44,9 +44,9 @@ def test_a_small_withdrawal_is_signed(api):
     assert again["check"]["path_reasons"][-1].endswith("AI check not needed")
 
 
-def test_d_binance_is_refused_and_wallet_paused(api):
+def test_d_delegation_drain_is_refused_and_wallet_paused(api):
     c, _ = api
-    out = withdraw(c, scenario_request("d_binance_7702"))
+    out = withdraw(c, scenario_request("d_delegation_drain"))
     chk = out["check"]
     assert chk["verdict"] == "BLOCK" and chk["path"] == "slow"
     assert {"R1", "R2", "R3"} <= {f["rule_id"] for f in chk["findings"]}
@@ -54,7 +54,7 @@ def test_d_binance_is_refused_and_wallet_paused(api):
     assert out["signer"]["signed"] is False and "no approval" in out["signer"]["reason"]
     assert HOT_D in paused(c)
     # the paused wallet's next request is blocked early (latched), still not signed
-    nxt = withdraw(c, {**scenario_request("d_binance_7702"), "authorization_list": None,
+    nxt = withdraw(c, {**scenario_request("d_delegation_drain"), "authorization_list": None,
                        "to": "0xc000000000000000000000000000000000000d01", "value": "1"})
     assert nxt["check"]["path"] == "early" and nxt["signer"]["signed"] is False
 
@@ -72,7 +72,7 @@ def test_f_honest_large_withdrawal_needs_human_not_paused(api):
 
 def test_reset_without_admin_token_is_refused_and_with_it_unpauses(api):
     c, _ = api
-    withdraw(c, scenario_request("d_binance_7702"))
+    withdraw(c, scenario_request("d_delegation_drain"))
     assert HOT_D in paused(c)
     assert c.post("/breaker/reset", json={"wallet": HOT_D}).status_code == 401
     assert c.post("/breaker/reset", json={"wallet": HOT_D}, headers={"X-Admin-Token": "nope"}).status_code == 403
@@ -92,9 +92,9 @@ def test_approval_cannot_be_reused_or_moved_to_another_request(tmp_path):
     assert "already used" in svc.signer.sign(tx, ap).reason
 
 
-def test_mercado_scenario_through_the_api(tmp_path):
+def test_multichain_drain_scenario_through_the_api(tmp_path):
     c, _ = client(tmp_path, runner=FakeRunner())
-    out = c.post("/scenarios/e_mercado_multichain/run").json()
+    out = c.post("/scenarios/e_multichain_drain/run").json()
     got = [(r["check"]["verdict"], r["signer"]["signed"]) for r in out["results"]]
     assert got[:8] == [("ALLOW", True)] * 8
     assert got[8:10] == [("DELAY", False)] * 2  # held: no approval until Phase 3 release

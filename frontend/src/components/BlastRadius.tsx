@@ -56,7 +56,7 @@ export function BlastRadius({ data, labels }: { data: any[]; labels: Record<stri
                 <p className="label">Chains reached</p>
                 <p className="mt-1 text-[20px] font-semibold text-ink" data-testid="br-chains">
                   {reached} of {br.real_attack_chains}
-                  <span className="text-[14px] font-medium text-muted"> in the real incident</span>
+                  <span className="text-[14px] font-medium text-muted"> in a real attack of this kind</span>
                 </p>
                 <div className="mt-3 flex gap-1" aria-hidden>
                   {Array.from({ length: br.real_attack_chains }, (_, i) => (

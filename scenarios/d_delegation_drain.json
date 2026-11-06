@@ -1,6 +1,6 @@
 {
-  "name": "d_binance_7702",
-  "title": "(d) Binance-style: hot wallet asked to sign 5 EIP-7702 authorizations to a sweeper",
+  "name": "d_delegation_drain",
+  "title": "(d) Hot wallet delegation drain (EIP-7702)",
   "description": "A compromised withdrawal service asks the hot wallet to sign a type-4 transaction with 5 authorizations (nonces 3-7) that delegate it to MockSweeper. The wallet's nonce is 6: the tx itself uses 6, so the authorization with nonce 7 matches. The request contains no sweep call; the Guard's probe finds it. The hot wallet is Anvil test account #1, so the sandbox replays a real type-4 tx.",
   "labels": {
     "0x70997970c51812dc3a010c7d01b50e0d17dc79c8": "hot wallet",
@@ -18,6 +18,7 @@
     {
       "t": 0,
       "label": "type-4 tx with 5 authorizations to MockSweeper",
+      "plain": "Hot wallet asked to hand control to an unknown contract",
       "expect": {"verdict": "BLOCK", "path": "slow", "rules": ["R1", "R2", "R3"]},
       "request": {
         "wallet_type": "customer_hot", "chain_id": 1,

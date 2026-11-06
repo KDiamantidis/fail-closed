@@ -1,6 +1,6 @@
 # Run the scenarios on Windows (Docker Desktop).
 #   .\scenarios\run.ps1                    # run-all: every scenario, one table + breaker state
-#   .\scenarios\run.ps1 d_binance_7702     # one scenario with the full report
+#   .\scenarios\run.ps1 d_delegation_drain     # one scenario with the full report
 param([string]$Scenario = "")
 $root = Split-Path $PSScriptRoot -Parent
 $venv = Join-Path $root "backend\.venv"

@@ -1,6 +1,6 @@
 {
   "name": "b_treasury_allowlisted_above_limit",
-  "title": "(b) Treasury: allowlisted destination, amount above limit",
+  "title": "(b) Treasury payout above the limit to its own cold storage",
   "description": "A known destination, but more than the treasury limit (10 ETH): a human confirms.",
   "labels": {
     "0x7000000000000000000000000000000000000b01": "treasury wallet",
@@ -19,6 +19,7 @@
     {
       "t": 0,
       "label": "50 ETH to allowlisted cold storage",
+      "plain": "Treasury sends 50 ETH to its own cold storage",
       "expect": {"verdict": "NEEDS_HUMAN", "rules": ["R4"]},
       "request": {
         "wallet_type": "treasury", "chain_id": 1,

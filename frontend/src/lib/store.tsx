@@ -6,7 +6,7 @@ export interface ScenarioInfo {
   title: string;
   description: string;
   labels: Record<string, string>;
-  requests: { label: string }[];
+  requests: { label: string; plain?: string }[];
 }
 
 export interface Run {

@@ -112,7 +112,7 @@ class DownLLM:
         raise ConnectionError("vultr inference unreachable")
 
 
-@pytest.mark.parametrize("name", ["a_customer_small_withdrawal", "d_binance_7702", "f_honest_large_withdrawal"])
+@pytest.mark.parametrize("name", ["a_customer_small_withdrawal", "d_delegation_drain", "f_honest_large_withdrawal"])
 def test_llm_down_changes_nothing_but_the_explanation(tmp_path, name):
     body = scenario_request(name)
     c_ok, _ = client(tmp_path / "ok", runner=FakeRunner())

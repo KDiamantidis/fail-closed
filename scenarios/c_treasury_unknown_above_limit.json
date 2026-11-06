@@ -1,6 +1,6 @@
 {
   "name": "c_treasury_unknown_above_limit",
-  "title": "(c) Treasury: plain transfer to an unknown address, above limit",
+  "title": "(c) Treasury payout above the limit to an unknown address",
   "description": "Not on the allowlist and above the limit: R5 blocks.",
   "labels": {
     "0x7000000000000000000000000000000000000c01": "treasury wallet",
@@ -20,6 +20,7 @@
     {
       "t": 0,
       "label": "50 ETH to an unknown address",
+      "plain": "Treasury sends 50 ETH to an address it does not know",
       "expect": {"verdict": "BLOCK", "rules": ["R5"]},
       "request": {
         "wallet_type": "treasury", "chain_id": 1,

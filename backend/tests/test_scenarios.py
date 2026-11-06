@@ -61,8 +61,8 @@ def test_scenario_file_is_valid(path):
     assert all("state" not in r.request and "balance" not in r.request for r in sc.requests if not r.is_action)
 
 
-def test_mercado_tokens_are_known_transfers():
-    sc = load(SCENARIOS / "e_mercado_multichain.json")
+def test_multichain_drain_tokens_are_known_transfers():
+    sc = load(SCENARIOS / "e_multichain_drain.json")
     s = sc.settings(Settings())
     kinds = [decode(r.tx(), s.known_tokens).kind for r in sc.requests]
     assert kinds.count(Kind.ERC20_TRANSFER) == 18
@@ -70,7 +70,7 @@ def test_mercado_tokens_are_known_transfers():
 
 
 @pytest.mark.parametrize("name", ["a_customer_small_withdrawal", "b_treasury_allowlisted_above_limit",
-                                  "c_treasury_unknown_above_limit", "e_mercado_multichain",
+                                  "c_treasury_unknown_above_limit", "e_multichain_drain",
                                   "f_honest_large_withdrawal"])
 def test_scenario_reaches_expected_verdicts_with_neutral_sandbox(name):
     sc, g = neutral_guard(name)
@@ -85,10 +85,10 @@ def test_scenario_reaches_expected_verdicts_with_neutral_sandbox(name):
         assert set(r.expect.rules) <= {f.rule_id for f in v.findings}, (r.label, v.reasons)
 
 
-def test_mercado_blast_radius_counts_only_allowed_before_the_freeze():
+def test_multichain_drain_blast_radius_counts_only_allowed_before_the_freeze():
     from cli import blast_radius
 
-    sc, g = neutral_guard("e_mercado_multichain")
+    sc, g = neutral_guard("e_multichain_drain")
     for r in sc.requests:
         g.clock = lambda r=r: 1_000_000.0 + r.t
         g.check(r.tx())

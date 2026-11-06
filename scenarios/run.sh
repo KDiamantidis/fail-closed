@@ -1,7 +1,7 @@
 #!/bin/sh
 # Run the scenarios (Linux / WSL2 / the Vultr VM).
 #   scenarios/run.sh                  # run-all: every scenario, one table + breaker state
-#   scenarios/run.sh d_binance_7702   # one scenario with the full report
+#   scenarios/run.sh d_delegation_drain   # one scenario with the full report
 set -eu
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(dirname "$here")"

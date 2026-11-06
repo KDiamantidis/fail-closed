@@ -45,7 +45,7 @@ export function Review() {
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div className="min-w-0">
                       <p className="flex flex-wrap items-center gap-2">
-                        <span className="text-[15px] font-semibold text-ink">{row ? row.item.label : "Held request"}</span>
+                        <span className="text-[15px] font-semibold text-ink">{row ? row.item.plain ?? row.item.label : "Held request"}</span>
                         {!outcome ? <VerdictPill v="NEEDS_HUMAN" /> : outcome.signed ? <Pill tone="ok" dot>Approved and signed</Pill> : <Pill tone="bad" dot>Not signed</Pill>}
                       </p>
                       <p className="mt-1 text-[13px] text-body">
@@ -102,7 +102,7 @@ export function Review() {
                 <li key={r.key} className="flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0">
                     <p className="flex flex-wrap items-center gap-2">
-                      <a href={`#/requests/${encodeURIComponent(r.key)}`} className="font-medium text-ink no-underline">{r.item.label}</a>
+                      <a href={`#/requests/${encodeURIComponent(r.key)}`} className="font-medium text-ink no-underline">{r.item.plain ?? r.item.label}</a>
                       <VerdictPill v="DELAY" />
                     </p>
                     <p className="mt-0.5 text-[13px] text-muted">

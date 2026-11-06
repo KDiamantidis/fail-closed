@@ -18,8 +18,8 @@ def summary(run):
 
 def test_each_scenario_run_has_its_own_state(tmp_path):
     c, svc = client(tmp_path, runner=FakeRunner())
-    first = c.post("/scenarios/d_binance_7702/run").json()
-    second = c.post("/scenarios/d_binance_7702/run").json()
+    first = c.post("/scenarios/d_delegation_drain/run").json()
+    second = c.post("/scenarios/d_delegation_drain/run").json()
     # the second visitor sees the same result, not "wallet already paused"
     assert summary(first) == summary(second) == [("BLOCK", "slow", False)]
     assert first["run_id"] != second["run_id"]
@@ -27,15 +27,15 @@ def test_each_scenario_run_has_its_own_state(tmp_path):
     # the main state is untouched by demo runs
     assert c.get("/breaker").json()["paused_wallets"] == []
     assert c.get("/history").json() == []
-    assert c.post("/withdraw", json={**scenario_request("d_binance_7702"), "authorization_list": None,
+    assert c.post("/withdraw", json={**scenario_request("d_delegation_drain"), "authorization_list": None,
                                      "to": "0xc000000000000000000000000000000000000d01", "value": "1"}
                   ).json()["check"]["path"] != "early"
 
 
-def test_mercado_twice_gives_identical_results(tmp_path):
+def test_multichain_drain_twice_gives_identical_results(tmp_path):
     c, _ = client(tmp_path, runner=FakeRunner())
-    a = c.post("/scenarios/e_mercado_multichain/run").json()
-    b = c.post("/scenarios/e_mercado_multichain/run").json()
+    a = c.post("/scenarios/e_multichain_drain/run").json()
+    b = c.post("/scenarios/e_multichain_drain/run").json()
     assert summary(a) == summary(b)
     assert summary(a)[20] == ("ALLOW", "slow", True)  # another customer, new destination: simulated
 
@@ -89,7 +89,7 @@ def test_api_answers_503_when_full_and_nothing_is_signed(tmp_path):
     t.join()
     busy = [h for h in c.get("/history").json() if any("guard busy" in str(f) for f in h["findings"])]
     assert busy and busy[0]["verdict"] == "BLOCK"
-    assert c.post("/scenarios/d_binance_7702/run").status_code == 200  # free again
+    assert c.post("/scenarios/d_delegation_drain/run").status_code == 200  # free again
 
 
 def test_fast_path_needs_no_slot(tmp_path):

@@ -108,19 +108,19 @@ export function aiCheckStep(path: string, reasons: string[] = []): { note: strin
 
 /** Incident replays: plain names, featured first. */
 export const REPLAYS: { name: string; title: string; blurb: string; featured: boolean }[] = [
-  { name: "d_binance_7702", title: "Binance-style EIP-7702 delegation (29 Oct)", featured: true,
-    blurb: "A hot wallet is asked to sign 5 delegation authorizations to a sweeper contract." },
-  { name: "e_mercado_multichain", title: "Mercado-style multi-chain drain (2 Nov)", featured: true,
-    blurb: "One address paid on 5 chains, token by token, after a small test transfer." },
-  { name: "f_honest_large_withdrawal", title: "Honest large withdrawal", featured: true,
+  { name: "d_delegation_drain", title: "Hot wallet delegation drain (EIP-7702)", featured: true,
+    blurb: "A hot wallet is asked to sign 5 authorizations that hand it to an unknown contract." },
+  { name: "e_multichain_drain", title: "Multi-chain drain after key theft", featured: true,
+    blurb: "One address paid on 5 chains, token by token, after a small test payment." },
+  { name: "f_honest_large_withdrawal", title: "Honest large customer withdrawal", featured: true,
     blurb: "A real customer takes out 40% of a hot wallet. A person decides; nobody else is stopped." },
-  { name: "g_coordinated_breaker", title: "Coordinated attack (breaker levels 1-4)", featured: true,
-    blurb: "Several wallets and chains attacked at once, then an operator resets the breaker." },
-  { name: "a_customer_small_withdrawal", title: "Small customer withdrawal", featured: false,
-    blurb: "An everyday payout. Approved instantly." },
-  { name: "b_treasury_allowlisted_above_limit", title: "Treasury payment above the limit", featured: false,
-    blurb: "A known destination, but more than the treasury limit." },
-  { name: "c_treasury_unknown_above_limit", title: "Treasury payment to an unknown address", featured: false,
+  { name: "g_coordinated_breaker", title: "Coordinated attack on several wallets and chains", featured: true,
+    blurb: "The breaker climbs from level 1 to the global stop, then an operator resets it." },
+  { name: "a_customer_small_withdrawal", title: "Everyday customer withdrawal", featured: false,
+    blurb: "A new customer gets a full check; the same customer again is approved instantly." },
+  { name: "b_treasury_allowlisted_above_limit", title: "Treasury payout above the limit", featured: false,
+    blurb: "To its own cold storage, but more than the treasury limit." },
+  { name: "c_treasury_unknown_above_limit", title: "Treasury payout to an unknown address", featured: false,
     blurb: "Not on the allowlist and above the limit." },
 ];
 

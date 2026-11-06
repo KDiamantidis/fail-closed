@@ -1,7 +1,7 @@
 """Fail Closed CLI.
 
     python backend/cli.py run-all [--dir scenarios] [--db data/run-all.sqlite3]
-    python backend/cli.py scenario scenarios/d_binance_7702.json [--db ...]
+    python backend/cli.py scenario scenarios/d_delegation_drain.json [--db ...]
     python backend/cli.py breaker [--db ...]
     python backend/cli.py reset --address 0x... | --wallet 0x... [--actor name] [--db ...]
 

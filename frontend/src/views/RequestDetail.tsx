@@ -155,7 +155,7 @@ export function RequestDetail({ row }: { row: Row }) {
     <div data-testid="request-detail" data-verdict={c.verdict}>
       <a href={`#/requests?run=${row.run.runId}`} className="text-[13px]">← {REPLAY_TITLE[row.run.scenario.name] ?? "All requests"}</a>
       <div className="mt-3">
-        <PageHeader title={plainTitle(row)} lead={<span className="text-[13px]">Replay step: {row.item.label}</span>} />
+        <PageHeader title={plainTitle(row)} lead={<span className="text-[13px]" data-testid="step-label">Replay step: {row.item.plain ?? row.item.label}</span>} />
       </div>
 
       <div className={`rounded-xl border px-5 py-4 ${BANNER[tone]}`} data-testid="verdict-banner">
@@ -187,6 +187,7 @@ export function RequestDetail({ row }: { row: Row }) {
             {c.path_reasons?.length > 0 && (
               <details className="mt-1 text-[12px] text-faint">
                 <summary className="cursor-pointer">Technical detail</summary>
+                <p className="mt-1 wrap-any" data-testid="step-technical">Step: {row.item.label}</p>
                 <p className="mt-1 wrap-any">{humanize(c.path_reasons.join("; "), labels)}</p>
               </details>
             )}

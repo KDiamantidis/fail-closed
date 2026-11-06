@@ -35,7 +35,7 @@ def test_client_chosen_run_id_lets_the_ui_subscribe_first(api):
 
 def test_blast_radius_and_skipped_time_in_the_result(api):
     c, _ = api
-    out = c.post("/scenarios/e_mercado_multichain/run").json()
+    out = c.post("/scenarios/e_multichain_drain/run").json()
     [br] = out["blast_radius"]
     assert br["address"] == "0xbad0000000000000000000000000000000000e01" and br["frozen_by"] == "R7"
     assert br["allowed_totals"]["native_units"] == "40.0001" and br["allowed_totals"]["token_types"] == 6

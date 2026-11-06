@@ -140,7 +140,7 @@ def test_ui_console(server, browser, viewport):
     assert page.locator('[data-testid="policy-ai-pct"]').inner_text().startswith("10% of the wallet balance")
 
     # (d) Binance-style: Blocked, signature refused, delegation + probe evidence, AI explains later
-    replay(page, "d_binance_7702")
+    replay(page, "d_delegation_drain")
     open_first_request(page)
     assert detail.get_attribute("data-verdict") == "BLOCK"
     banner = page.locator('[data-testid="verdict-banner"]').inner_text()
@@ -157,7 +157,7 @@ def test_ui_console(server, browser, viewport):
     shot(page, f"{viewport}-2-binance-detail", full=viewport == "phone")
 
     # (e) Mercado-style: the blast radius card
-    replay(page, "e_mercado_multichain")
+    replay(page, "e_multichain_drain")
     br = page.locator('[data-testid="blast-radius"]')
     br.wait_for()
     assert page.locator('[data-testid="br-chains"]').inner_text().startswith("2 of 10")
