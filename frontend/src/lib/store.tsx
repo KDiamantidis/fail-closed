@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getJSON, newRunId, postJSON, postStream, subscribeRun, type GuardEvent, type Verdict } from "./api";
+import { levelOf, type RiskLevel } from "./risk";
 
 export interface ScenarioInfo {
   name: string;
@@ -18,6 +19,7 @@ export interface Run {
   events: GuardEvent[];
   result?: any;
   decisions?: Record<string, any>;
+  liftedBreaker?: any;  // the breaker after an admin "lift" (back to level 0)
 }
 
 /** One checked request, flattened from a replay result for tables and KPIs. */
@@ -47,8 +49,19 @@ export interface Status {
   delay_minutes: number;
 }
 
+/** The risk level the whole UI shows: the latest replay's breaker (live while it runs), or
+ * this Guard's own state when no replay has run. */
+export interface Risk {
+  level: RiskLevel;
+  state: any;
+  runId: string | null;   // the replay it belongs to (null: the Guard's own state)
+  source: string | null;  // scenario name
+}
+
 interface Store {
   status: Status | null;
+  risk: Risk;
+  liftBreaker: (adminToken: string) => Promise<string | null>;  // null = done, else the error
   scenarios: ScenarioInfo[];
   runs: Run[];
   rows: Row[];
@@ -83,6 +96,7 @@ function useHashRoute(): [string, (to: string) => void] {
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status | null>(null);
+  const [mainBreaker, setMainBreaker] = useState<any>(null);
   const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
   const [sim, setSim] = useState<SimState>({ status: "idle", rows: [] });
@@ -90,7 +104,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const closers = useRef<(() => void)[]>([]);
 
   useEffect(() => {
-    const load = () => getJSON<Status>("/status").then(setStatus).catch(() => setStatus(null));
+    const load = () => {
+      getJSON<Status>("/status").then(setStatus).catch(() => setStatus(null));
+      getJSON("/breaker").then(setMainBreaker).catch(() => setMainBreaker(null));
+    };
     load();
     getJSON<ScenarioInfo[]>("/scenarios").then(setScenarios).catch(() => setScenarios([]));
     const t = window.setInterval(load, 15000);
@@ -166,8 +183,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return out.sort((a, b) => b.ts - a.ts);
   }, [runs]);
 
-  const value = useMemo<Store>(() => ({ status, scenarios, runs, rows, sim, running, runReplay, runSim, decide, route, go }),
-    [status, scenarios, runs, rows, sim, running, runReplay, runSim, decide, route, go]);
+  const risk = useMemo<Risk>(() => {
+    const lb = latestBreaker(runs);
+    if (lb) return { level: levelOf(lb.state), state: lb.state, runId: lb.runId, source: lb.source };
+    return { level: levelOf(mainBreaker), state: mainBreaker, runId: null, source: null };
+  }, [runs, mainBreaker]);
+
+  const liftBreaker = useCallback(async (adminToken: string) => {
+    const path = risk.runId ? `/demo/${risk.runId}/breaker/reset-all` : "/breaker/reset-all";
+    try {
+      const r = await postJSON(path, undefined, { "X-Admin-Token": adminToken });
+      if (risk.runId) patch(risk.runId, (run) => ({ ...run, liftedBreaker: r.breaker }));
+      else setMainBreaker(r.breaker);
+      return null;
+    } catch (e: any) {
+      return String(e.message ?? e);
+    }
+  }, [risk.runId, patch]);
+
+  const value = useMemo<Store>(() => ({ status, risk, liftBreaker, scenarios, runs, rows, sim, running, runReplay,
+    runSim, decide, route, go }),
+    [status, risk, liftBreaker, scenarios, runs, rows, sim, running, runReplay, runSim, decide, route, go]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
@@ -213,18 +249,22 @@ export function kpis(rows: Row[], sim: SimState) {
   };
 }
 
-export function breakerLevel(state: any): number {
-  if (!state) return 0;
-  if (state.global_stop) return 4;
-  if (state.safe_mode_chains?.length) return 3;
-  if (state.paused_wallets?.length) return 2;
-  if (state.frozen_destinations?.length) return 1;
-  return 0;
+export const breakerLevel = levelOf;
+
+const NORMAL = { frozen_destinations: [], paused_wallets: [], safe_mode_chains: [], global_stop: null };
+
+/** A replay's breaker now: after an admin lift, else the last step's state (live while running). */
+export function runBreaker(run: Run): any {
+  if (run.liftedBreaker) return run.liftedBreaker;
+  if (run.status === "done" && run.result?.breaker) return run.result.breaker;
+  const ev = [...run.events].reverse().find((e) => e.type === "breaker_state");
+  return ev ? ev.data : NORMAL;  // a replay starts on its own fresh state: level 0
 }
 
-export function latestBreaker(runs: Run[]): { state: any; source: string } | null {
-  const r = runs.find((x) => x.result?.breaker);
-  return r ? { state: r.result.breaker, source: r.scenario.name } : null;
+/** The latest replay's breaker (the one the UI colour follows). */
+export function latestBreaker(runs: Run[]): { state: any; source: string; runId: string } | null {
+  const r = runs[0];
+  return r ? { state: runBreaker(r), source: r.scenario.name, runId: r.runId } : null;
 }
 
 /** Explanation events for a check (made after the verdict, async). */

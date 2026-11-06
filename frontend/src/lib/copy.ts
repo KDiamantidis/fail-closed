@@ -115,7 +115,7 @@ export const REPLAYS: { name: string; title: string; blurb: string; featured: bo
   { name: "f_honest_large_withdrawal", title: "Honest large customer withdrawal", featured: true,
     blurb: "A real customer takes out 40% of a hot wallet. A person decides; nobody else is stopped." },
   { name: "g_coordinated_breaker", title: "Coordinated attack on several wallets and chains", featured: true,
-    blurb: "The breaker climbs from level 1 to the global stop, then an operator resets it." },
+    blurb: "The breaker climbs from level 1 to the global stop. An operator lifts it with the admin token." },
   { name: "a_customer_small_withdrawal", title: "Everyday customer withdrawal", featured: false,
     blurb: "A new customer gets a full check; the same customer again is approved instantly." },
   { name: "b_treasury_allowlisted_above_limit", title: "Treasury payout above the limit", featured: false,

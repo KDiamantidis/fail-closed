@@ -1,19 +1,17 @@
-import { useEffect, useState } from "react";
 import { BreakerLadder } from "../components/BreakerLadder";
 import { Card, PageHeader, Pill } from "../components/ui";
-import { getJSON, humanize } from "../lib/api";
+import { humanize } from "../lib/api";
 import { REPLAY_TITLE } from "../lib/copy";
-import { breakerLevel, latestBreaker, useStore } from "../lib/store";
+import { RISK } from "../lib/risk";
+import { useStore } from "../lib/store";
 
 export function BreakerPage() {
-  const { runs } = useStore();
-  const [main, setMain] = useState<any>(null);
-  useEffect(() => { getJSON("/breaker").then(setMain).catch(() => setMain(null)); }, []);
-  const lb = latestBreaker(runs);
-  const state = lb?.state ?? main;
-  const labels = runs.find((r) => r.scenario.name === lb?.source)?.scenario.labels ?? {};
-  const level = breakerLevel(state);
-  const resets = runs.filter((r) => r.scenario.name === lb?.source).flatMap((r) =>
+  const { runs, risk } = useStore();
+  const lb = risk.source ? { source: risk.source } : null;
+  const state = risk.state;
+  const labels = runs.find((r) => r.runId === risk.runId)?.scenario.labels ?? {};
+  const level = risk.level;
+  const resets = runs.filter((r) => r.runId === risk.runId).flatMap((r) =>
     (r.result?.results ?? []).filter((x: any) => x.action));
 
   return (
@@ -23,7 +21,7 @@ export function BreakerPage() {
       <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
         <Card title="Status"
           action={<Pill tone={level >= 3 ? "bad" : level ? "held" : "ok"} dot>
-            {level ? `Level ${level} active` : "Normal operation"}
+            {level ? `Level ${level} active · ${RISK[level].name}` : "Normal operation"}
           </Pill>}>
           <p className="-mt-1 mb-4 text-[13px] text-muted">
             {lb ? `State after your replay: ${REPLAY_TITLE[lb.source] ?? lb.source}.` : "Live state of this Guard. Run a replay to see the breaker react."}

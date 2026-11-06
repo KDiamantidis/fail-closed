@@ -30,6 +30,13 @@
   --color-review: #175cd3;  --color-review-bg: #eff8ff; --color-review-line: #b2ddff;
   --color-bad: #b42318;     --color-bad-bg: #fef3f2;    --color-bad-line: #fecdca;
 
+  /* Risk scale (circuit breaker level). Text on its tint >= 7:1; dots >= 3:1 on white. */
+  --color-risk0-dot: #667085;
+  --color-risk1: #93370d;  --color-risk1-bg: #fffaeb;  --color-risk1-line: #fedf89;  --color-risk1-dot: #dc6803;
+  --color-risk2: #9c2a10;  --color-risk2-bg: #fff6ed;  --color-risk2-line: #f9dbaf;  --color-risk2-dot: #e62e05;
+  --color-risk3: #912018;  --color-risk3-bg: #fef3f2;  --color-risk3-line: #fecdca;  --color-risk3-dot: #d92d20;
+  --color-risk4-bg: #7a271a;  --color-risk4-line: #55160c;
+
   --color-chart-fast: #0d9488;  /* validated pair (dataviz validator, light) */
   --color-chart-slow: #c2410c;
 
@@ -80,7 +87,10 @@
 @keyframes enter { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 .pulse-dot { animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.35; } }
+/* Risk colour changes: a short fade only; none with reduced motion. */
+.risk-fade { transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease; }
 @media (prefers-reduced-motion: reduce) {
+  .risk-fade { transition: none; }
   .enter { animation: fade 150ms ease both; }
   .pulse-dot { animation: none; }
 }

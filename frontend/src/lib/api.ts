@@ -18,10 +18,10 @@ export async function getJSON<T = any>(path: string): Promise<T> {
   return r.json();
 }
 
-export async function postJSON<T = any>(path: string, body?: unknown): Promise<T> {
+export async function postJSON<T = any>(path: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
   const r = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: { "Content-Type": "application/json", Accept: "application/json", ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await r.json().catch(() => ({}));
@@ -37,7 +37,7 @@ export function newRunId(): string {
 
 const EVENT_TYPES = ["run_started", "received", "decoded", "request_rules", "path", "sandbox_started",
   "sandbox_done", "findings", "verdict", "approval", "signer", "explanation", "human_action",
-  "human_decision", "hold_blocked", "run_finished"];
+  "human_decision", "hold_blocked", "run_finished", "breaker_state"];
 
 /** Subscribe to one demo run's events. Resolves once the stream is open. */
 export function subscribeRun(runId: string, onEvent: (e: GuardEvent) => void): Promise<() => void> {

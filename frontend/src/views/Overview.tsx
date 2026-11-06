@@ -1,10 +1,11 @@
 import { ActivityFeed } from "../components/ActivityFeed";
 import { BlastRadius } from "../components/BlastRadius";
 import { BreakerLadder } from "../components/BreakerLadder";
+import { RiskKpi } from "../components/Risk";
 import { Card, PageHeader, Pill, Spinner, VerdictPill } from "../components/ui";
 import { eth } from "../lib/api";
 import { REPLAYS } from "../lib/copy";
-import { kpis, latestBreaker, useStore, type Run } from "../lib/store";
+import { kpis, useStore, type Run } from "../lib/store";
 
 function Kpi({ label, value, note, tone = "text-ink", testid }:
   { label: string; value: string; note?: string; tone?: string; testid?: string }) {
@@ -35,9 +36,8 @@ function outcome(run: Run | undefined) {
 }
 
 export function Overview() {
-  const { rows, sim, runs, running, runReplay, scenarios } = useStore();
+  const { rows, sim, runs, running, runReplay, scenarios, risk } = useStore();
   const k = kpis(rows, sim);
-  const lb = latestBreaker(runs);
   const latestWithBlast = runs.find((r) => r.result?.blast_radius?.length);
   const lastRun = (name: string) => runs.find((r) => r.scenario.name === name);
   const ready = scenarios.length > 0;
@@ -62,7 +62,8 @@ export function Overview() {
       <PageHeader title="Overview"
         lead="Every signing request is checked before a signature exists. Unusual requests run in an isolated sandbox first; fixed rules decide, and nothing is signed without the Guard's approval." />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4" data-testid="kpis">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5" data-testid="kpis">
+        <RiskKpi />
         <Kpi label="Requests checked" value={String(k.checked)} testid="kpi-checked" />
         <Kpi label="Approved" value={String(k.approved)} tone={k.approved ? "text-ok" : "text-ink"} />
         <Kpi label="Held" value={String(k.held)} tone={k.held ? "text-held" : "text-ink"} />
@@ -91,9 +92,9 @@ export function Overview() {
         <div className="space-y-6">
           <Card title="Circuit breaker" action={<a href="#/breaker" className="text-[13px]">Details →</a>}>
             <p className="mb-3 text-[13px] text-muted">
-              {lb ? "State of your latest replay." : "Live state. Run a replay to see it react."}
+              {risk.runId ? "State of your latest replay." : "Live state. Run a replay to see it react."}
             </p>
-            <BreakerLadder state={lb?.state ?? null} labels={runs[0]?.scenario.labels ?? {}} compact />
+            <BreakerLadder state={risk.state} labels={runs[0]?.scenario.labels ?? {}} compact />
           </Card>
           <Card title="Live activity" action={running ? <Pill tone="brand" dot>Live</Pill> : undefined}>
             <ActivityFeed runs={runs} />

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { breakerLevel, latestBreaker, useStore } from "../lib/store";
+import { useStore } from "../lib/store";
+import { GlobalStopBanner, RiskDot, RiskStrip } from "./Risk";
 import { Pill } from "./ui";
 
 const ICONS: Record<string, ReactNode> = {
@@ -29,10 +30,8 @@ function Logo() {
   );
 }
 
-const LEVEL_WORD = ["Normal", "Address frozen", "Wallet paused", "Chain in safe mode", "Global stop"];
-
 export function Shell({ children }: { children: ReactNode }) {
-  const { status, route, rows, runs } = useStore();
+  const { status, route, rows, runs, risk } = useStore();
   const pendingReview = runs.reduce((n, r) => n + (r.result?.pending?.length ?? 0), 0);
   const nav = [
     { to: "/overview", label: "Overview", icon: "overview" },
@@ -44,12 +43,11 @@ export function Shell({ children }: { children: ReactNode }) {
     { to: "/policies", label: "Policies", icon: "policies" },
   ];
   const active = (to: string) => route === to || route.startsWith(to + "/");
-  const lb = latestBreaker(runs);
-  const level = lb ? breakerLevel(lb.state) : status?.breaker_level ?? 0;
 
   return (
     <div className="min-h-dvh">
       <header className="sticky top-0 z-20 border-b border-border bg-surface">
+        <RiskStrip />
         <div className="flex items-center justify-between gap-3 px-4 py-3 lg:px-6">
           <a href="#/overview" className="flex items-center gap-2.5 text-ink no-underline" aria-label="Fail Closed, overview">
             <Logo />
@@ -65,9 +63,6 @@ export function Shell({ children }: { children: ReactNode }) {
               <Pill tone={status?.llm === "REAL" ? "ok" : "held"} testid="pill-ai">
                 AI analysis: {status ? (status.llm === "REAL" ? status.model : status.llm === "MOCK" ? "Mock" : "Off") : "…"}
               </Pill>
-              <Pill tone={level >= 3 ? "bad" : level > 0 ? "held" : "ok"} dot testid="pill-breaker">
-                Breaker: level {level} · {LEVEL_WORD[level]}
-              </Pill>
             </span>
           </div>
         </div>
@@ -75,13 +70,13 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="flex gap-1.5 overflow-x-auto px-4 pb-2 md:hidden">
           <Pill>Sandbox: {status?.sandbox_mode === "warm" ? "Warm" : "Fresh"}</Pill>
           <Pill tone={status?.llm === "REAL" ? "ok" : "held"}>AI: {status?.llm === "REAL" ? status.model : status?.llm === "OFF" ? "Off" : "Mock"}</Pill>
-          <Pill tone={level >= 3 ? "bad" : level > 0 ? "held" : "ok"} dot>Breaker L{level}</Pill>
         </div>
         <nav className="flex gap-1 overflow-x-auto border-t border-border px-3 py-1.5 lg:hidden" aria-label="Sections">
           {nav.map((n) => (
             <a key={n.to} href={`#${n.to}`} data-testid={`nav-${n.icon}`}
               className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium no-underline ${active(n.to) ? "bg-brand-tint text-brand" : "text-body"}`}>
               {n.label}{n.count ? <span className="text-faint">{n.count}</span> : null}
+              {n.icon === "breaker" && <RiskDot level={risk.level} />}
             </a>
           ))}
         </nav>
@@ -89,7 +84,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
       <div className="flex">
         <div className="hidden w-60 shrink-0 border-r border-border bg-surface lg:block">
-        <aside className="sticky top-[61px] flex h-[calc(100dvh-61px)] flex-col px-3 py-4">
+        <aside className="sticky top-[93px] flex h-[calc(100dvh-93px)] flex-col px-3 py-4">
           <nav className="space-y-0.5" aria-label="Sections">
             {nav.map((n) => (
               <a key={n.to} href={`#${n.to}`} aria-current={active(n.to) ? "page" : undefined}
@@ -97,6 +92,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 <Icon name={n.icon} />
                 <span className="flex-1">{n.label}</span>
                 {n.count ? <span className="rounded-full bg-subtle px-1.5 text-[11px] text-muted">{n.count}</span> : null}
+                {n.icon === "breaker" && <RiskDot level={risk.level} />}
               </a>
             ))}
           </nav>
@@ -106,7 +102,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </aside>
         </div>
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-          <div className="mx-auto max-w-[1180px]">{children}</div>
+          <div className="mx-auto max-w-[1180px]"><GlobalStopBanner />{children}</div>
           <footer className="mx-auto mt-12 flex max-w-[1180px] flex-wrap items-center justify-between gap-3 border-t border-border pt-5 text-[13px] text-muted">
             <span>Fail Closed · No approval, no signature.</span>
             <span className="flex gap-4">
