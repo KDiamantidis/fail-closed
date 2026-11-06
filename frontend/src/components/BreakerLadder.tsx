@@ -12,6 +12,11 @@ export const LEVELS = [
     words: "No approvals at all. Only with two independent signals." },
 ];
 
+// Active levels use the same risk tints as the strip (level 4 stays light here; the banner is the deep red).
+const ACTIVE: Record<number, string> = { 1: "border-risk1-line bg-risk1-bg", 2: "border-risk2-line bg-risk2-bg",
+  3: "border-risk3-line bg-risk3-bg", 4: "border-risk3-line bg-risk3-bg" };
+const ACTIVE_TEXT: Record<number, string> = { 1: "text-risk1", 2: "text-risk2", 3: "text-risk3", 4: "text-risk3" };
+
 export function BreakerLadder({ state, labels, compact = false }:
   { state: any | null; labels: Record<string, string>; compact?: boolean }) {
   return (
@@ -22,7 +27,7 @@ export function BreakerLadder({ state, labels, compact = false }:
         const on = items.length > 0;
         return (
           <li key={l.n} data-level={l.n} data-on={on}
-            className={`rounded-lg border px-4 py-3 ${on ? (l.n >= 3 ? "border-bad-line bg-bad-bg" : "border-held-line bg-held-bg") : "border-border bg-surface"}`}>
+            className={`risk-fade rounded-lg border px-4 py-3 ${on ? ACTIVE[l.n] : "border-border bg-surface"}`}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="font-semibold text-ink">
@@ -30,7 +35,8 @@ export function BreakerLadder({ state, labels, compact = false }:
                 </p>
                 {!compact && <p className="mt-0.5 text-[13px] text-muted">{l.words}</p>}
               </div>
-              {on ? <Pill tone={l.n >= 3 ? "bad" : "held"} dot>Active</Pill> : <Pill>Off</Pill>}
+              {on ? <span className={`inline-flex items-center gap-1.5 rounded-full border border-current px-2 py-0.5 text-[12px] font-medium ${ACTIVE_TEXT[l.n]}`}>
+                <span className="size-1.5 rounded-full bg-current" aria-hidden />Active</span> : <Pill>Off</Pill>}
             </div>
             {on && (
               <ul className="mt-2 space-y-1 text-[13px]">
