@@ -2,7 +2,7 @@
 
 Target: **Ubuntu 24.04, 2 vCPU / 4 GB, Stockholm**, SSH key login, user `root` at first.
 Domain: **`<ip>.sslip.io`** (resolves to the VM, free, real certificate; no certificate email).
-Release: git tag **`v1.1-hackathon`** (`v1.0-hackathon` is the earlier one, kept).
+Release: git tag **`v1.2-hackathon`** (`v1.0-hackathon` and `v1.1-hackathon` are earlier ones, kept).
 
 Everything runs from this laptop with `deploy/deploy.sh` over SSH (key `~/.ssh/id_ed25519`).
 The scripts in `deploy/remote/` run on the VM. **Secrets never pass through the scripts or
@@ -40,7 +40,7 @@ Internet ──443/80──► Caddy (Docker Compose, system Docker, host networ
 |---|---|---|
 | 1 | you | Tell Claude the VM's IPv4 address. |
 | 2 | Claude | `deploy/deploy.sh <IP> bootstrap`: user `ops` with your key, firewall, swap, Docker; then root and password login off (checked: `ops` works first, root is refused after). |
-| 3 | Claude | `deploy/deploy.sh <IP> install`: user `failclosed`, rootless Docker, code at `v1.1-hackathon`, sandbox image, web UI, `.env` with both secrets **empty**, systemd unit, Caddy files. About 10 minutes. |
+| 3 | Claude | `deploy/deploy.sh <IP> install`: user `failclosed`, rootless Docker, code at `v1.2-hackathon`, sandbox image, web UI, `.env` with both secrets **empty**, systemd unit, Caddy files. About 10 minutes. |
 | 4 | Claude | `deploy/deploy.sh <IP> secrets`: prints the exact command for you. |
 | 5 | **you** | In **your own terminal** (not the Claude Code prompt, not with `!`, so nothing reaches the chat): `ssh -t ops@<IP> "sudo -u failclosed nano /opt/fail-closed/app/.env"`. Fill in `VULTR_INFERENCE_API_KEY=` and `ADMIN_TOKEN=` (make one with `ssh ops@<IP> "openssl rand -hex 32"`). Save: Ctrl+O, Enter, Ctrl+X. Keep the token safe. Tell Claude "secrets done". |
 | 6 | Claude | `deploy/deploy.sh <IP> finish`: checks both lines are filled (prints only "set" / "MISSING"), starts the API and Caddy, waits for the certificate. |
@@ -56,8 +56,8 @@ to compare it, the Vultr console shows the VM's SSH host key fingerprints after 
 ## Update
 
 ```sh
-git tag v1.2-hackathon && git push origin v1.2-hackathon     # on the laptop
-deploy/deploy.sh <IP> release v1.2-hackathon
+git tag v1.3-hackathon && git push origin v1.3-hackathon     # on the laptop
+deploy/deploy.sh <IP> release v1.3-hackathon
 ```
 
 `release` (`deploy/remote/release.sh`) on the VM:
@@ -121,75 +121,85 @@ anyone else; the only shared state is the Guard's own, and in public mode only t
 change it. The client IP for the limits is the last `X-Forwarded-For` entry, trusted only from
 127.0.0.1 (Caddy or the tunnel on the same host).
 
-## Plan B: no VM by Saturday 10:00 (laptop + Cloudflare tunnel)
+## Plan B: no VM by Saturday 10:00 (laptop + Cloudflare quick tunnel)
 
 For the submission, if we use it:
 
 > The Vultr VM was blocked by account review before the deadline, so the demo runs on the
 > laptop; the AI still runs on Vultr Serverless Inference.
 
-### 1. Start the app on the laptop (local only)
+### What Plan B runs
 
-`deploy/planb.ps1` runs the app like the VM does: `PUBLIC_DEMO=true`, the same per-IP limits
-(10 replays a minute, 2 simulations per 10 minutes, 30 demo actions a minute), a $1/day AI budget
-kept in `data/planb/llm_budget.json`, the AI on Vultr Serverless Inference (`LLM_MODE=live`: no
-key means AI off, never the mock), the warm sandbox pool. No Caddy: the tunnel gives HTTPS. The
-API listens on 127.0.0.1:8000 only. Secrets stay in the local `.env`; the script only checks
-that they are set and never prints them.
+`deploy/planb.ps1 start` runs the app like the VM does, with these laptop settings:
+
+| Setting | Plan B | VM | Why |
+|---|---|---|---|
+| `PUBLIC_DEMO` | true | true | visitors: replays, simulation, review demo; admin token for the rest |
+| per-IP limits | 10 replays/min, 2 simulations/10 min, 30 demo actions/min, 300 update polls/min | same | |
+| AI | Vultr Serverless Inference, $1/day budget | same | no key = AI off, never the mock |
+| `LIVE_UPDATES` | `poll` | `sse` | a quick tunnel does not pass Server-Sent Events; the page polls every 2 s |
+| `TRUSTED_PROXY` | `cloudflared` (CF-Connecting-IP, only from 127.0.0.1) | `caddy` (X-Forwarded-For, only from 127.0.0.1) | the real visitor IP for the limits |
+| `SANDBOX_POOL_SIZE` | 2 | 4 | laptop RAM |
+| `RAM_GUARD_MIN_FREE_GB` | 0.75 | off | below it, no new sandbox; new slow-path work waits, then "Guard busy" (never an approval) |
+| `DEPLOY_TARGET` | `laptop` | `vm` | the page footer says where it runs |
+| listen address | 127.0.0.1:8000 only | 127.0.0.1:8000 behind Caddy | |
+
+The page shows a calm "Updates every 2 s" note while it polls, and "Updates delayed, retrying…"
+if polls fail.
+
+Rehearsal, 2026-11-06, this laptop (Windows 11, 16 CPUs, Docker Desktop), `start -Rehearsal`,
+polling and warm pool 2: replay (d) blocked in 3.0 s, risk "High: 1 wallet paused", the AI card
+(`glm-5.3`) arrived by polling; replay (g) reached the global stop in 14.7 s; Reset demo back to
+level 0; 0 requests to `/stream`, 20 polls, no page errors; `stop` removed both sandboxes, none
+left; AI spend $0.017; the key in no log file. Lowest free RAM 1.87 GB (with warm pool 4 the
+earlier rehearsal went down to 1.14 GB).
+
+### Tomorrow: the exact order
+
+1. **Close other programs** (browsers you do not need, Discord, Spotify, IDEs). Start Docker
+   Desktop and wait until it says it is running. Plan B refuses to start below 2 GB free RAM.
+2. **Set `ADMIN_TOKEN` yourself** (once), in your own terminal:
+   `backend\.venv\Scripts\python -c "import secrets; print(secrets.token_hex(32))"`, then
+   `notepad .env`, paste it after `ADMIN_TOKEN=`, save. Keep it somewhere safe.
+3. **Start:** `.\deploy\planb.ps1 start`. It prints `RUNNING: http://127.0.0.1:8000`.
+   Open that address once and run replay (d) to warm it up.
+4. **Install cloudflared** (once): `winget install --id Cloudflare.cloudflared`, then open a new
+   terminal and check `cloudflared --version`. (Or the `.msi` from
+   github.com/cloudflare/cloudflared/releases.)
+5. **Start the quick tunnel** in its own terminal and leave it open:
+   `cloudflared tunnel --url http://127.0.0.1:8000`. It prints
+   `https://<random-words>.trycloudflare.com`.
+6. **Phone test on mobile data** (Wi-Fi off), with that address:
+   - the page loads, the footer says the demo runs on the laptop;
+   - run "Hot wallet delegation drain": Blocked, "Nothing was signed", the risk strip turns orange,
+     the AI card arrives within a few seconds ("Updates every 2 s" shows in the header);
+   - run "Coordinated attack": the global stop banner; press "Reset demo": back to Normal;
+   - run any replay **11 times within one minute**: the 11th shows "Too many replays from your
+     address: at most 10 per minute…" (this proves the limits see your phone's address);
+   - `https://<address>/check` in the browser shows "Method Not Allowed", and a POST to it needs the
+     admin token (nothing to do; it is checked by the tests).
+7. **While the demo runs:** `.\deploy\planb.ps1 status` now and then (sandboxes, free RAM, AI spend,
+   "listens on 127.0.0.1 only"). Keep the laptop on, plugged in, never sleeping.
+8. **Afterwards:** Ctrl+C in the cloudflared terminal, then `.\deploy\planb.ps1 stop`.
+
+### Quick tunnel limits
+
+From Cloudflare's documentation ("Quick Tunnels"): no account and no domain needed; **no
+Server-Sent Events** (handled: the page polls); at most 200 requests in flight; **the address
+changes every time** cloudflared starts and stops working when it stops; the laptop must stay on
+and awake.
+
+### Named tunnel: a stable address (decide tomorrow)
+
+Needs a free Cloudflare account and **a domain whose DNS is on Cloudflare**. Then, once:
 
 ```powershell
-.\deploy\planb.ps1 start     # checks free RAM (>= 2 GB), Docker, the image, the built UI, the secrets
-.\deploy\planb.ps1 status    # API, Plan B sandbox count, free RAM, today's AI spend
-.\deploy\planb.ps1 stop      # stops the API and removes every Plan B sandbox container
-```
-
-Before the first `start`, set `ADMIN_TOKEN` yourself (the script refuses to start without it):
-`backend\.venv\Scripts\python -c "import secrets; print(secrets.token_hex(32))"`, then
-`notepad .env` and paste it into the `ADMIN_TOKEN=` line. (`start -Rehearsal` runs without it,
-with every admin action disabled: for local tests only.)
-
-Rehearsal on 2026-11-06, this laptop (Windows 11, 16 CPUs, Docker Desktop), `start -Rehearsal`:
-replay (d) blocked in 2.9 s, nothing signed, explanation by `glm-5.3`; replay (g) reached the
-global stop in 14.2 s; Reset demo back to level 0; `stop` removed all 4 sandboxes, none left; AI
-spend $0.004; the key in no log file. Free RAM went from 3.9 GB down to 1.1 GB at the lowest
-(API + 4 warm sandboxes + the test browser): close other programs before the demo.
-
-### 2. Install cloudflared (once, by hand)
-
-```powershell
-winget install --id Cloudflare.cloudflared
-cloudflared --version            # open a new terminal first if it is not found
-```
-
-(Or download `cloudflared-windows-amd64.msi` from github.com/cloudflare/cloudflared/releases.)
-
-### 3a. Quick tunnel: no account, no domain
-
-```powershell
-cloudflared tunnel --url http://127.0.0.1:8000
-```
-
-It prints a public `https://<random-words>.trycloudflare.com` address. Limits, from Cloudflare's
-documentation (developers.cloudflare.com, "Quick Tunnels"):
-- **No Server-Sent Events.** Our UI gets the live replay steps (the rising risk colour) and the
-  AI explanations over SSE. Through a quick tunnel, replays still finish and show their verdicts,
-  but the live steps and the explanation cards would not arrive. Test it before sharing the link.
-- At most 200 requests in flight at once (more get 429).
-- **The address changes every time** cloudflared starts, and stops working when it stops.
-- **The laptop must stay on and awake**, with Docker Desktop running (Settings → Power: never sleep).
-
-### 3b. Named tunnel: a stable address, SSE works
-
-Needs a free Cloudflare account and **a domain whose DNS is on Cloudflare** (nameservers pointed
-to Cloudflare). Then, once:
-
-```powershell
-cloudflared tunnel login                                   # opens the browser, pick the domain
+cloudflared tunnel login
 cloudflared tunnel create fail-closed
 cloudflared tunnel route dns fail-closed demo.<your-domain>
 ```
 
-and a `%USERPROFILE%\.cloudflared\config.yml`:
+with `%USERPROFILE%\.cloudflared\config.yml`:
 
 ```yaml
 tunnel: fail-closed
@@ -200,17 +210,7 @@ ingress:
   - service: http_status:404
 ```
 
-Run it with `cloudflared tunnel run fail-closed`. The address stays the same across restarts.
-The laptop must still stay on and awake.
-
-### 4. Before sharing the link
-
-- From a phone on mobile data: the page loads, replay (d) is blocked, `POST /check` answers 401.
-- The rate limits see the visitor's address: the API trusts `X-Forwarded-For` only from
-  127.0.0.1, which is where cloudflared connects from. Run 11 replays in a minute from one phone:
-  the 11th must get "Too many replays".
-- `.\deploy\planb.ps1 status` every so often: sandbox count, free RAM, AI spend.
-- Afterwards: Ctrl+C in the cloudflared window, then `.\deploy\planb.ps1 stop`.
+and `cloudflared tunnel run fail-closed`. The address stays the same across restarts.
 
 ## What I need from you on deploy day
 

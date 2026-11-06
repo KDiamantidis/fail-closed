@@ -18,7 +18,7 @@ set -euo pipefail
 IP="${1:?usage: deploy/deploy.sh <IP> <step> [args]}"
 STEP="${2:?step: bootstrap | install | secrets | finish | verify | all | release <tag>}"
 shift 2
-TAG="${TAG:-v1.1-hackathon}"
+TAG="${TAG:-v1.2-hackathon}"
 KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 OPS="${OPS_USER:-ops}"
 DOCKER_MODE="${DOCKER_MODE:-rootless}"
