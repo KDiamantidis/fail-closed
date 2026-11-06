@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     # fails) or "poll" (always poll GET /events; e.g. behind a Cloudflare quick tunnel, which
     # does not support SSE).
     live_updates: str = "sse"
+    # Which local proxy may tell us the visitor's IP (per-IP limits): "caddy" (X-Forwarded-For, the
+    # VM), "cloudflared" (CF-Connecting-IP, Plan B) or "none". Only for requests from 127.0.0.1.
+    trusted_proxy: str = "caddy"
 
     # Sandbox: fresh container per check, always destroyed.
     sandbox_image: str = "fail-closed-sandbox:foundry-v1.8.5"

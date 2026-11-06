@@ -11,6 +11,8 @@
 
   Same settings as the VM: PUBLIC_DEMO=true, the same per-IP limits, a $1/day AI budget, the AI on
   Vultr Serverless Inference (LLM_MODE=live: no key = AI off, never the mock), warm sandbox pool.
+  For the tunnel: updates by polling (LIVE_UPDATES=poll), the visitor IP from CF-Connecting-IP
+  (TRUSTED_PROXY=cloudflared), the API on 127.0.0.1 only.
   Secrets are read by the API from the local .env; this script only checks that they are set and
   never prints them.
 #>
@@ -105,6 +107,8 @@ function Start-PlanB {
   $env:RATE_SIMULATIONS_PER_10_MINUTES = "2"
   $env:RATE_DEMO_ACTIONS_PER_MINUTE = "30"
   $env:DEMO_IDLE_RESET_MINUTES = "10"
+  $env:LIVE_UPDATES = "poll"                     # a Cloudflare quick tunnel does not pass Server-Sent Events
+  $env:TRUSTED_PROXY = "cloudflared"              # visitor IP from CF-Connecting-IP, only from 127.0.0.1
   $env:PYTHONUNBUFFERED = "1"
 
   $p = Start-Process -FilePath $Python -WorkingDirectory $Backend -WindowStyle Hidden -PassThru `
@@ -154,6 +158,12 @@ function Status-PlanB {
       Write-Host ("  AI spend today: `${0} of `${1}{2}" -f $s.llm_budget.spent_today_usd, $s.llm_budget.limit_usd, $(if ($s.llm_budget.reached) { " (REACHED: explanations paused)" } else { "" }))
     } catch { Write-Host "  /status does not answer" -ForegroundColor Yellow }
   } else { Write-Host "API: not running" }
+  $listen = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $_.LocalAddress } | Select-Object -Unique)
+  if ($listen.Count) {
+    $open = @($listen | Where-Object { $_ -ne "127.0.0.1" -and $_ -ne "::1" })
+    if ($open.Count) { Write-Host "  WARNING: port $Port listens on $($open -join ', '), not only on 127.0.0.1" -ForegroundColor Red }
+    else { Write-Host "  listens on 127.0.0.1 only" }
+  }
   Write-Host "sandbox containers (Plan B): $((Sandbox-Ids).Count)"
   Write-Host "free RAM: $(Free-GB) GB"
 }

@@ -187,3 +187,48 @@ def test_decisions_keep_working_when_the_budget_is_reached():
     assert ex["available"] is False and ex["budget"] is True and ex["reason"] == BUDGET_MESSAGE
     assert BUDGET_MESSAGE == "Demo budget reached: AI explanations paused until tomorrow"
     assert e.client.calls == 0
+
+
+# ---- the visitor's IP behind cloudflared (Plan B) -------------------------------------------------
+
+def _req(peer, headers):
+    return SimpleNamespace(client=SimpleNamespace(host=peer), headers={k.lower(): v for k, v in headers.items()})
+
+
+def test_cf_connecting_ip_is_trusted_only_from_localhost_and_only_for_cloudflared():
+    cf = {"CF-Connecting-IP": "198.51.100.7", "X-Forwarded-For": "203.0.113.9"}
+    assert api.client_ip(_req("127.0.0.1", cf), "cloudflared") == "198.51.100.7"
+    assert api.client_ip(_req("::1", cf), "cloudflared") == "198.51.100.7"
+    assert api.client_ip(_req("192.0.2.50", cf), "cloudflared") == "192.0.2.50"  # not local: ignored
+    assert api.client_ip(_req("127.0.0.1", cf), "caddy") == "203.0.113.9"  # the VM: Caddy's header, not CF's
+    assert api.client_ip(_req("127.0.0.1", cf), "none") == "127.0.0.1"  # setting off: no header trusted
+    assert api.client_ip(_req("127.0.0.1", {"CF-Connecting-IP": "not-an-ip"}), "cloudflared") == "127.0.0.1"
+    assert api.client_ip(_req("127.0.0.1", {"X-Forwarded-For": "198.51.100.7"}), "cloudflared") == "127.0.0.1"
+
+
+def test_two_visitors_behind_cloudflared_get_separate_limits(tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "TRUSTED_PROXIES", ("testclient",))  # the test client stands in for 127.0.0.1
+    c, _ = public(tmp_path, rate_replays_per_minute=2, trusted_proxy="cloudflared")
+    a, b = {"CF-Connecting-IP": "198.51.100.7"}, {"CF-Connecting-IP": "203.0.113.9"}
+    for _ in range(2):
+        assert c.post("/scenarios/a_customer_small_withdrawal/run", headers=a).status_code == 200
+    assert c.post("/scenarios/a_customer_small_withdrawal/run", headers=a).status_code == 429
+    assert c.post("/scenarios/a_customer_small_withdrawal/run", headers=b).status_code == 200  # someone else
+
+
+def test_cf_header_is_ignored_when_the_setting_is_off(tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "TRUSTED_PROXIES", ("testclient",))
+    c, _ = public(tmp_path, rate_replays_per_minute=2, trusted_proxy="none")
+    for ip in ("198.51.100.7", "203.0.113.9"):  # a client cannot pick a new address per request
+        c.post("/scenarios/a_customer_small_withdrawal/run", headers={"CF-Connecting-IP": ip})
+    r = c.post("/scenarios/a_customer_small_withdrawal/run", headers={"CF-Connecting-IP": "192.0.2.1"})
+    assert r.status_code == 429
+
+
+def test_polling_has_its_own_limit_and_is_not_a_replay(tmp_path):
+    c, _ = public(tmp_path, rate_polls_per_minute=3, rate_replays_per_minute=1)
+    for _ in range(3):
+        assert c.get("/events?after=0").status_code == 200
+    r = c.get("/events?after=0")
+    assert r.status_code == 429 and r.json()["detail"].startswith("Too many update requests")
+    assert c.post("/scenarios/a_customer_small_withdrawal/run").status_code == 200  # polls did not use it up

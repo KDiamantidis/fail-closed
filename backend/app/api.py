@@ -17,6 +17,7 @@ No response ever contains a secret: no settings, no API keys, no private keys.
 """
 
 import asyncio
+import ipaddress
 from collections import deque
 import json
 import re
@@ -119,14 +120,27 @@ def _window_words(seconds: float) -> str:
     return "minute" if seconds == 60 else f"{seconds / 60:g} minutes"
 
 
-def client_ip(request: Request) -> str:
-    """The visitor's address. Behind our own proxy (Caddy or the tunnel on this host) it is the
-    last X-Forwarded-For entry, the one the proxy added; otherwise the socket peer."""
+def client_ip(request: Request, trusted_proxy: str = "caddy") -> str:
+    """The visitor's address, for the per-IP limits. A proxy header is trusted ONLY when the
+    request comes from this host (127.0.0.1 / ::1: Caddy or cloudflared) AND the setting names
+    that proxy:
+      caddy        the last X-Forwarded-For entry (the one Caddy added)   - the VM
+      cloudflared  CF-Connecting-IP (set by Cloudflare); X-Forwarded-For is ignored - Plan B
+      none         no header is trusted
+    Anything else, or a header that is not an IP address: the socket peer."""
     peer = request.client.host if request.client else "unknown"
-    fwd = request.headers.get("x-forwarded-for", "")
-    if peer in TRUSTED_PROXIES and fwd:
-        return fwd.split(",")[-1].strip() or peer
-    return peer
+    if peer not in TRUSTED_PROXIES:
+        return peer
+    if trusted_proxy == "cloudflared":
+        value = request.headers.get("cf-connecting-ip", "").strip()
+    elif trusted_proxy == "caddy":
+        value = request.headers.get("x-forwarded-for", "").split(",")[-1].strip()
+    else:
+        value = ""
+    try:
+        return str(ipaddress.ip_address(value)) if value else peer
+    except ValueError:
+        return peer
 RUN_ID = re.compile(r"^[a-z0-9]{8,32}$")
 FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
 
@@ -302,7 +316,7 @@ def create_app(services: Services | None = None) -> FastAPI:
 
     def limit(request: Request, what: str, n: int, window: float, words: str) -> None:
         if svc.settings.public_demo:
-            limiter.hit(what, client_ip(request), n, window, words)
+            limiter.hit(what, client_ip(request, svc.settings.trusted_proxy), n, window, words)
 
     def admin_in_public_demo(token: str | None) -> None:
         """Public demo: the raw API on the Guard's own state is for the operator only."""
