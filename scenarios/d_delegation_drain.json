@@ -2,10 +2,13 @@
   "name": "d_delegation_drain",
   "title": "(d) Hot wallet delegation drain (EIP-7702)",
   "description": "A compromised withdrawal service asks the hot wallet to sign a type-4 transaction with 5 authorizations (nonces 3-7) that delegate it to MockSweeper. The wallet's nonce is 6: the tx itself uses 6, so the authorization with nonce 7 matches. The request contains no sweep call; the Guard's probe finds it. The hot wallet is Anvil test account #1, so the sandbox replays a real type-4 tx.",
+  "technical_labels": {
+    "0x00000000000000000000000000000000005eeeee": "MockSweeper (the demo's stand-in for an attacker sweeper, sandbox/src/MockSweeper.sol)"
+  },
   "labels": {
     "0x70997970c51812dc3a010c7d01b50e0d17dc79c8": "hot wallet",
     "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc": "attacker (hard-coded in sweeper)",
-    "0x00000000000000000000000000000000005eeeee": "MockSweeper"
+    "0x00000000000000000000000000000000005eeeee": "attacker sweeper contract"
   },
   "policy": {"delegate_allowlist": []},
   "state": {

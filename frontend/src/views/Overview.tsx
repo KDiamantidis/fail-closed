@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { BlastRadius } from "../components/BlastRadius";
 import { BreakerLadder } from "../components/BreakerLadder";
@@ -36,6 +37,44 @@ function outcome(run: Run | undefined) {
   );
 }
 
+const TOUR_KEY = "fc.tour.hidden";
+
+function readHidden(): boolean {
+  try { return window.localStorage.getItem(TOUR_KEY) === "1"; } catch { return false; }
+}
+
+function saveHidden(v: boolean) {
+  try { window.localStorage.setItem(TOUR_KEY, v ? "1" : "0"); } catch { /* private window: per page view only */ }
+}
+
+/** First visit: three steps. Hidden after the first replay; a small link brings it back. */
+function Tour({ hasRuns }: { hasRuns: boolean }) {
+  const [hidden, setHidden] = useState(readHidden);
+  useEffect(() => { if (hasRuns && !hidden) { setHidden(true); saveHidden(true); } }, [hasRuns]);  // eslint-disable-line react-hooks/exhaustive-deps
+  if (hidden) {
+    return (
+      <p className="mb-4 text-[13px]">
+        <button type="button" className="cursor-pointer font-medium text-brand hover:text-brand-hover" data-testid="tour-show"
+          onClick={() => { setHidden(false); saveHidden(false); }}>Try it in 60 seconds</button>
+      </p>
+    );
+  }
+  return (
+    <section className="card mb-6 border-[#99e6d4] px-5 py-4" data-testid="tour" aria-label="Try it in 60 seconds">
+      <div className="flex items-start justify-between gap-3">
+        <h2 className="text-[15px] font-semibold text-ink">Try it in 60 seconds</h2>
+        <button type="button" className="cursor-pointer text-[13px] font-medium text-muted hover:text-ink" data-testid="tour-hide"
+          onClick={() => { setHidden(true); saveHidden(true); }}>Hide</button>
+      </div>
+      <ol className="mt-2 list-decimal space-y-1 pl-5 text-[13.5px] text-body">
+        <li>Run <span className="font-medium text-ink">Hot wallet delegation drain</span>: the Guard blocks it and nothing is signed.</li>
+        <li>Run <span className="font-medium text-ink">Coordinated attack</span> and watch the risk level rise to the global stop.</li>
+        <li>Press <span className="font-medium text-ink">Reset demo</span> to go back to level 0.</li>
+      </ol>
+    </section>
+  );
+}
+
 export function Overview() {
   const { rows, sim, runs, running, runReplay, scenarios, risk } = useStore();
   const k = kpis(rows, sim);
@@ -62,6 +101,8 @@ export function Overview() {
     <>
       <PageHeader title="Overview"
         lead="Every signing request is checked before a signature exists. Unusual requests run in an isolated sandbox first; fixed rules decide, and nothing is signed without the Guard's approval." />
+
+      <Tour hasRuns={runs.length > 0} />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5" data-testid="kpis">
         <RiskKpi />

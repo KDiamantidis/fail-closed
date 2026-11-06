@@ -103,19 +103,19 @@ export function Review() {
                   <div className="min-w-0">
                     <p className="flex flex-wrap items-center gap-2">
                       <a href={`#/requests/${encodeURIComponent(r.key)}`} className="font-medium text-ink no-underline">{r.item.plain ?? r.item.label}</a>
-                      <VerdictPill v="DELAY" />
+                      {!w && <VerdictPill v="DELAY" />}
                     </p>
                     <p className="mt-0.5 text-[13px] text-muted">
                       to <Addr a={r.check.decoded?.destination} labels={labels} />
-                      {r.check.release_at ? <> · release at {clock(r.check.release_at)}</> : null}
+                      {!w && r.check.release_at ? <> · release at {clock(r.check.release_at)}</> : null}
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
                     {w ? (
                       w.status === "released"
-                        ? <Pill tone="ok" dot>Released and signed</Pill>
-                        : <Pill tone="bad" dot>Not released: blocked</Pill>
-                    ) : <Pill>Waiting</Pill>}
+                        ? <Pill tone="ok" dot testid="held-state">Released and signed</Pill>
+                        : <Pill tone="bad" dot testid="held-state">Blocked while held: never released</Pill>
+                    ) : <Pill testid="held-state">Waiting</Pill>}
                     <Pill testid="skipped-label">Demo: {r.run.result?.delay_worker?.skipped_minutes ?? 15} min skipped</Pill>
                   </div>
                 </li>

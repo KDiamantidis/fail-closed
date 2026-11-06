@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { useStore } from "../lib/store";
+import { useEffect, useRef, type ReactNode } from "react";
+import { useStore, type Status } from "../lib/store";
 import { DemoNotice, GlobalStopBanner, RiskDot, RiskStrip } from "./Risk";
 import { Pill } from "./ui";
 
@@ -30,6 +30,20 @@ function Logo() {
   );
 }
 
+const VULTR_LINE = "Runs on Vultr: Serverless Inference (AI) · Cloud Compute (Guard + sandboxes)";
+
+function aiChip(status: Status | null): string {
+  if (!status) return "AI: …";
+  if (status.llm === "MOCK") return "AI: Mock";
+  if (status.llm === "OFF") return "AI: Off";
+  return status.llm_budget?.reached ? "AI: Vultr · paused (daily budget)" : `AI: Vultr · ${status.model}`;
+}
+
+export function modelsLine(status: Status | null): string {
+  if (!status || status.llm !== "REAL") return "AI: local mock, no model is called";
+  return `checks: ${status.model} · explanations: ${status.explain_model ?? status.model}`;
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const { status, route, rows, runs, risk } = useStore();
   const pendingReview = runs.reduce((n, r) => n + (r.result?.pending?.length ?? 0), 0);
@@ -43,6 +57,11 @@ export function Shell({ children }: { children: ReactNode }) {
     { to: "/policies", label: "Policies", icon: "policies" },
   ];
   const active = (to: string) => route === to || route.startsWith(to + "/");
+  const tabs = useRef<HTMLElement>(null);
+  useEffect(() => {  // phone: keep the active tab in view
+    const a = tabs.current?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (a && tabs.current) tabs.current.scrollTo({ left: a.offsetLeft - tabs.current.clientWidth / 2 + a.clientWidth / 2 });
+  }, [route]);
 
   return (
     <div className="min-h-dvh">
@@ -60,27 +79,30 @@ export function Shell({ children }: { children: ReactNode }) {
             <Pill tone="brand" testid="env-badge">Environment: Demo</Pill>
             <span className="hidden flex-wrap gap-1.5 md:flex">
               <Pill testid="pill-sandbox">Sandbox: {status ? (status.sandbox_mode === "warm" ? "Warm pool" : "Fresh") : "…"}</Pill>
-              <Pill tone={status?.llm === "REAL" ? "ok" : "held"} testid="pill-ai">
-                AI analysis: {status ? (status.llm_budget?.reached && status.llm === "REAL" ? "paused (daily budget)"
-                  : status.llm === "REAL" ? status.model : status.llm === "MOCK" ? "Mock" : "Off") : "…"}
-              </Pill>
+              <span title={modelsLine(status)}>
+                <Pill tone={status?.llm === "REAL" ? "ok" : "held"} testid="pill-ai">{aiChip(status)}</Pill>
+              </span>
             </span>
           </div>
         </div>
         {/* phones: status pills and the navigation as a scrollable row */}
         <div className="flex gap-1.5 overflow-x-auto px-4 pb-2 md:hidden">
           <Pill>Sandbox: {status?.sandbox_mode === "warm" ? "Warm" : "Fresh"}</Pill>
-          <Pill tone={status?.llm === "REAL" ? "ok" : "held"}>AI: {status?.llm === "REAL" ? status.model : status?.llm === "OFF" ? "Off" : "Mock"}</Pill>
+          <Pill tone={status?.llm === "REAL" ? "ok" : "held"}>{aiChip(status)}</Pill>
         </div>
-        <nav className="flex gap-1 overflow-x-auto border-t border-border px-3 py-1.5 lg:hidden" aria-label="Sections">
+        <div className="relative border-t border-border lg:hidden">
+        <nav ref={tabs} className="flex gap-1 overflow-x-auto px-3 py-1.5 pr-10" aria-label="Sections" data-testid="phone-tabs">
           {nav.map((n) => (
-            <a key={n.to} href={`#${n.to}`} data-testid={`nav-${n.icon}`}
+            <a key={n.to} href={`#${n.to}`} data-testid={`nav-${n.icon}`} aria-current={active(n.to) ? "page" : undefined}
               className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium no-underline ${active(n.to) ? "bg-brand-tint text-brand" : "text-body"}`}>
               {n.label}{n.count ? <span className="text-faint">{n.count}</span> : null}
               {n.icon === "breaker" && <RiskDot level={risk.level} />}
             </a>
           ))}
         </nav>
+        {/* the tabs scroll: a fade on the right edge says so */}
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-surface to-transparent" aria-hidden />
+        </div>
       </header>
 
       <div className="flex">
@@ -97,15 +119,16 @@ export function Shell({ children }: { children: ReactNode }) {
               </a>
             ))}
           </nav>
-          <div className="mt-auto rounded-lg border border-border bg-subtle p-3 text-[12px] text-muted">
-            Demo environment. Every replay runs on its own isolated state, on a local test chain.
+          <div className="mt-auto space-y-2 rounded-lg border border-border bg-subtle p-3 text-[12px] text-muted">
+            <p>Demo environment. Every replay runs on its own isolated state, on a local test chain.</p>
+            <p data-testid="vultr-sidebar">{VULTR_LINE}</p>
           </div>
         </aside>
         </div>
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="mx-auto max-w-[1180px]"><DemoNotice /><GlobalStopBanner />{children}</div>
           <footer className="mx-auto mt-12 flex max-w-[1180px] flex-wrap items-center justify-between gap-3 border-t border-border pt-5 text-[13px] text-muted">
-            <span>Fail Closed · No approval, no signature.</span>
+            <span>Fail Closed · No approval, no signature.<span className="block text-[12px]" data-testid="vultr-footer">{VULTR_LINE}</span></span>
             <span className="flex gap-4">
               <a href="https://github.com/KDiamantidis/fail-closed" target="_blank" rel="noreferrer">GitHub</a>
               <a href="https://github.com/KDiamantidis/fail-closed#how-it-works" target="_blank" rel="noreferrer">How it works</a>

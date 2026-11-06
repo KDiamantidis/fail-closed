@@ -320,6 +320,7 @@ def create_app(services: Services | None = None) -> FastAPI:
         level = level_of(svc.breaker.state())
         return {"sandbox_mode": svc.settings.sandbox_mode, "llm": "MOCK" if svc.guard.explainer.mode == "mock"
                 else "REAL" if svc.guard.explainer.mode == "live" else "OFF", "model": svc.settings.vultr_model,
+                "explain_model": svc.settings.vultr_explain_model or svc.settings.vultr_model,
                 "breaker_level": level, "redteam_public": svc.settings.redteam_public,
                 "fast_path_llm_escalation": svc.settings.fast_path_llm_escalation,
                 "delay_minutes": svc.settings.delay_minutes,
@@ -603,6 +604,7 @@ def create_app(services: Services | None = None) -> FastAPI:
         for name, path in _scenario_files().items():
             sc = load(path)
             out.append({"name": name, "title": sc.title, "description": sc.description, "labels": sc.labels,
+                        "technical_labels": sc.technical_labels,
                         "requests": [{"label": r.label, "plain": r.plain or r.label, "expect": r.expect.model_dump()}
                                      for r in sc.requests]})
         return out

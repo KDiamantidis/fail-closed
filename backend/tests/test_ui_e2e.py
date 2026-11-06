@@ -162,6 +162,21 @@ def test_ui_console(server, browser, viewport):
     assert kpi.get_attribute("data-level") == "0" and page.locator('[data-testid="kpi-risk-name"]').inner_text() == "Normal"
     assert page.locator('[data-testid="global-stop-banner"]').count() == 0
 
+    # first visit: the 60-second tour; Vultr named in the header chip, sidebar or footer
+    assert page.locator('[data-testid="tour"]').inner_text().startswith("Try it in 60 seconds")
+    vultr = "Runs on Vultr: Serverless Inference (AI) · Cloud Compute (Guard + sandboxes)"
+    assert page.locator('[data-testid="vultr-footer"]').inner_text() == vultr
+    if viewport == "desktop":
+        assert page.locator('[data-testid="vultr-sidebar"]').inner_text() == vultr
+        assert page.locator('[data-testid="pill-ai"]').inner_text() == (
+            "AI: Vultr · glm-5.3-flash" if LIVE else "AI: Mock")
+    else:  # the phone tab bar scrolls: the active tab stays in view
+        go(page, "/policies")
+        page.wait_for_timeout(300)
+        box = page.locator('[data-testid="nav-policies"]').bounding_box()
+        assert box and box["x"] >= 0 and box["x"] + box["width"] <= VIEWPORTS["phone"]["width"]
+        go(page, "/overview")
+
     # (a) a new customer gets a full simulation; the same customer again is approved on the rules alone
     replay(page, "a_customer_small_withdrawal")
     detail = page.locator('[data-testid="request-detail"]')
@@ -178,6 +193,8 @@ def test_ui_console(server, browser, viewport):
     first, again = seen["First payout to a new customer"], seen["Second payout to the same customer"]
     assert "not asked: new destination" in first[0] and "never paid before" in first[1]
     assert "not needed: known destination, small amount" in again[0]
+    go(page, "/overview")  # the tour hides after the first replay; a link brings it back
+    assert page.locator('[data-testid="tour"]').count() == 0 and page.locator('[data-testid="tour-show"]').is_visible()
     assert_level(page, 0, "Normal")
     go(page, "/overview")
     no_hscroll(page)
@@ -200,6 +217,14 @@ def test_ui_console(server, browser, viewport):
         "Signature refused: no approval from the Guard")
     assert "Control handed over" in page.locator('[data-testid="delegation-line"]').inner_text()
     assert "sweep() moved 100 ETH" in page.locator('[data-testid="probe-evidence"]').inner_text()
+    # "Delegates to" instead of the wallet twice; plain words in the evidence, the demo
+    # contract's real name only under "Technical detail"
+    assert page.locator('[data-testid="delegates-to"]').inner_text() == "0x0000…eeee · unknown contract"
+    evidence = page.locator('[data-testid="evidence"]')
+    assert "attacker sweeper contract" in evidence.inner_text() and "MockSweeper" not in evidence.inner_text()
+    assert "MockSweeper" in page.locator('[data-testid="evidence-technical"]').first.text_content()
+    assert "checks: glm-5.3-flash · explanations: glm-5.3" in page.locator('[data-testid="ai-models"]').inner_text() \
+        if LIVE else "Vultr Serverless Inference" in page.locator('[data-testid="ai-models"]').inner_text()
     # a plain step label; the technical one stays under the collapsed "Technical detail"
     assert page.locator('[data-testid="step-label"]').inner_text() == (
         "Replay step: Hot wallet asked to hand control to an unknown contract")
@@ -236,6 +261,11 @@ def test_ui_console(server, browser, viewport):
     assert "Signed" in decision.inner_text()
     held = page.locator('[data-testid="held-list"]')  # the multi-chain replay's held requests
     assert "min skipped" in held.inner_text()
+    # one clear state per held row: blocked rows show no release time
+    states = held.locator('[data-testid="held-state"]').all_inner_texts()
+    assert "Blocked while held: never released" in states and "Not released: blocked" not in held.inner_text()
+    blocked_rows = held.locator("li").filter(has_text="Blocked while held")
+    assert all("release at" not in t for t in blocked_rows.all_inner_texts())
     assert_level(page, 0, "Normal")  # the latest replay paused nobody
     no_hscroll(page)
     shot(page, f"{viewport}-review-queue")

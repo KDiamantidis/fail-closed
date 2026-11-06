@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { modelsLine } from "../components/Shell";
 import { Addr, Card, PageHeader, Pill, verdictTone } from "../components/ui";
 import { eth, hexToInt, humanize, ms, short } from "../lib/api";
 import { aiCheckStep, headline, PATH_WORD, pathWords, rank, REPLAY_TITLE, ruleReason } from "../lib/copy";
@@ -129,6 +130,18 @@ function Probe({ probe, labels }: { probe: any[]; labels: Record<string, string>
   );
 }
 
+/** For a delegation: the contract the wallet would hand control to (from the sandbox evidence). */
+function delegateOf(c: any): string | null {
+  if (c.decoded?.kind !== "delegation") return null;
+  const probe = (c.simulation?.probe ?? []).find((p: any) => p.delegate);
+  if (probe) return String(probe.delegate).toLowerCase();
+  for (const acct of Object.values(c.simulation?.state_diff?.post ?? {}) as any[]) {
+    const code = String(acct?.code ?? "");
+    if (code.startsWith("0xef0100")) return "0x" + code.slice(8, 48);
+  }
+  return null;
+}
+
 function plainTitle(row: Row): string {
   const labels = row.run.scenario.labels ?? {};
   const d = row.check.decoded;
@@ -150,6 +163,9 @@ export function RequestDetail({ row }: { row: Row }) {
   const ai = explanationFor(row.run, c.check_id) ?? (c.llm ? { available: true, ...c.llm } : null);
   const held = (row.run.result?.delay_worker?.results ?? []).find((d: any) => d.id === c.check_id);
   const sim = c.simulation;
+  const delegate = delegateOf(c);
+  const tech = row.run.scenario.technical_labels ?? {};
+  const technical = Object.entries(tech).filter(([a]) => JSON.stringify(sim ?? {}).toLowerCase().includes(a.slice(2)));
 
   return (
     <div data-testid="request-detail" data-verdict={c.verdict}>
@@ -174,7 +190,12 @@ export function RequestDetail({ row }: { row: Row }) {
           <Card title="Request">
             <dl className="grid grid-cols-1 gap-4 min-[480px]:grid-cols-2 sm:grid-cols-3">
               <Meta k="Wallet"><Addr a={row.received?.from} labels={labels} /></Meta>
-              <Meta k="Destination"><Addr a={c.decoded?.destination} labels={labels} /></Meta>
+              {delegate ? (
+                <Meta k="Delegates to"><span title={delegate} className="whitespace-nowrap" data-testid="delegates-to">
+                  <span className="mono text-ink">{short(delegate)}</span>
+                  <span className="text-muted"> · {(c.findings ?? []).some((f: any) => f.rule_id === "R1") ? "unknown contract" : (labels[delegate] ?? "contract")}</span>
+                </span></Meta>
+              ) : <Meta k="Destination"><Addr a={c.decoded?.destination} labels={labels} /></Meta>}
               <Meta k="Amount">{amountText(row)}</Meta>
               <Meta k="Chain">{row.received?.chain_id ?? "–"}</Meta>
               <Meta k="Check">{PATH_WORD[c.path] ?? c.path}</Meta>
@@ -202,6 +223,14 @@ export function RequestDetail({ row }: { row: Row }) {
                   </p>
                   <Diff diff={sim.state_diff} labels={labels} />
                   <Probe probe={sim.probe} labels={labels} />
+                  {technical.length > 0 && (
+                    <details className="mt-3 text-[12px] text-faint">
+                      <summary className="cursor-pointer">Technical detail</summary>
+                      {technical.map(([a, name]) => (
+                        <p key={a} className="mt-1 wrap-any" data-testid="evidence-technical"><span className="mono">{a}</span>: {name}</p>
+                      ))}
+                    </details>
+                  )}
                 </>
               ) : (
                 <p className="text-[13px] text-bad">The sandbox check failed, so the request was blocked: {sim.error}</p>
@@ -258,6 +287,7 @@ export function RequestDetail({ row }: { row: Row }) {
               : undefined}>
             <p className="mb-3 rounded-md bg-subtle px-3 py-2 text-[12px] text-muted">
               AI explains, it never decides. The verdict above comes from fixed rules.
+              <span className="mt-0.5 block text-faint" data-testid="ai-models">Vultr Serverless Inference · {modelsLine(status)}</span>
             </p>
             {!ai && <p className="text-[13px] text-muted">Analysis in progress. It arrives after the verdict.</p>}
             {ai && !ai.available && <p className="text-[13px] text-muted" data-testid="ai-unavailable">

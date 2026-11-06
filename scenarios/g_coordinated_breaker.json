@@ -2,13 +2,16 @@
   "name": "g_coordinated_breaker",
   "title": "(g) Coordinated attack on several wallets and chains (breaker levels 1-4)",
   "description": "A multi-chain drain to one address freezes it (level 1). Four hot wallets are asked to delegate to a sweeper; each is paused (level 2). Two paused wallets on chain 1 put chain 1 in safe mode (level 3): a normal withdrawal there needs a human. Two more on chain 10 put chain 10 in safe mode too: two independent signals trigger the global stop (level 4), and even a normal withdrawal on another chain is blocked. The replay stops there: lifting the global stop is an operator action (admin token), which returns this replay to level 0.",
+  "technical_labels": {
+    "0x00000000000000000000000000000000005eeeee": "MockSweeper (the demo's stand-in for an attacker sweeper, sandbox/src/MockSweeper.sol)"
+  },
   "labels": {
     "0x1000000000000000000000000000000000000701": "hot wallet 1",
     "0x1000000000000000000000000000000000000706": "hot wallet 6 (customers)",
     "0xbad0000000000000000000000000000000000701": "attacker address",
     "0xc000000000000000000000000000000000000701": "customer",
     "0xc000000000000000000000000000000000000702": "another customer",
-    "0x00000000000000000000000000000000005eeeee": "MockSweeper",
+    "0x00000000000000000000000000000000005eeeee": "attacker sweeper contract",
     "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc": "attacker (hard-coded in sweeper)",
     "0x1000000000000000000000000000000000000702": "hot wallet 2",
     "0x1000000000000000000000000000000000000703": "hot wallet 3",

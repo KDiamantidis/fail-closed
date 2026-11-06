@@ -82,6 +82,7 @@ class Scenario(BaseModel):
     title: str
     description: str = ""
     labels: dict[str, str] = Field(default_factory=dict)
+    technical_labels: dict[str, str] = Field(default_factory=dict)  # shown only under "Technical detail"
     policy: dict[str, Any] = Field(default_factory=dict)
     state: StartingState
     requests: list[ScenarioRequest]
@@ -98,6 +99,7 @@ class Scenario(BaseModel):
 def load(path: Path) -> Scenario:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     raw["labels"] = {k.lower(): v for k, v in raw.get("labels", {}).items()}
+    raw["technical_labels"] = {k.lower(): v for k, v in raw.get("technical_labels", {}).items()}
     sc = Scenario.model_validate(raw)
     sc.path = Path(path)
     return sc

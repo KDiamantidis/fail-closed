@@ -7,6 +7,7 @@ export interface ScenarioInfo {
   title: string;
   description: string;
   labels: Record<string, string>;
+  technical_labels?: Record<string, string>;
   requests: { label: string; plain?: string }[];
 }
 
@@ -44,6 +45,7 @@ export interface Status {
   sandbox_mode: string;
   llm: "REAL" | "MOCK" | "OFF";
   model: string;
+  explain_model?: string;
   breaker_level: number;
   redteam_public: boolean;
   delay_minutes: number;
