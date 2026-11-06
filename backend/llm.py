@@ -18,6 +18,7 @@ import time
 from collections import Counter
 from contextlib import contextmanager
 from fractions import Fraction
+from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
@@ -72,12 +73,16 @@ def failure_kind(e: BaseException) -> str:
 
 class CallSlots:
     """One shared limit for every model call (LLM_CONCURRENCY). Fast-path checks go first:
-    while one waits, no explanation takes a free slot. Explanations wait in line (no deadline);
-    a fast-path check waits at most its budget, then the caller sends the request to full simulation."""
+    while one waits, no explanation takes a free slot. Explanations use at most n-1 slots, so one
+    slot is always free for a check (with n = 1 they share the only one). Explanations wait in
+    line (no deadline); a fast-path check waits at most its budget, then the caller sends the
+    request to full simulation."""
 
     def __init__(self, n: int):
         self.n = max(1, n)
+        self.explain_max = max(1, self.n - 1)
         self.used = 0
+        self.explaining = 0
         self.fast_waiting = 0
         self.peak = 0
         self.explain_waits = 0  # explanations that had to wait for a slot
@@ -90,7 +95,8 @@ class CallSlots:
                 self.fast_waiting += 1
             try:
                 waited = False
-                while not (self.used < self.n and (fast or self.fast_waiting == 0)):
+                while not (self.used < self.n and (fast or (self.fast_waiting == 0
+                                                             and self.explaining < self.explain_max))):
                     left = None if deadline is None else deadline - time.monotonic()
                     if left is not None and left <= 0:
                         return False
@@ -99,6 +105,8 @@ class CallSlots:
                 if waited and not fast:
                     self.explain_waits += 1
                 self.used += 1
+                if not fast:
+                    self.explaining += 1
                 self.peak = max(self.peak, self.used)
                 return True
             finally:
@@ -106,9 +114,11 @@ class CallSlots:
                     self.fast_waiting -= 1
                     self._cv.notify_all()  # a waiting explanation may go now
 
-    def release(self) -> None:
+    def release(self, fast: bool = False) -> None:
         with self._cv:
             self.used -= 1
+            if not fast:
+                self.explaining -= 1
             self._cv.notify_all()
 
     @contextmanager
@@ -117,11 +127,76 @@ class CallSlots:
         try:
             yield
         finally:
-            self.release()
+            self.release(fast)
 
     def snapshot(self) -> dict[str, int]:
         with self._cv:
-            return {"limit": self.n, "in_use": self.used, "peak": self.peak, "explain_waits": self.explain_waits}
+            return {"limit": self.n, "explain_max": self.explain_max, "in_use": self.used,
+                    "explaining": self.explaining, "peak": self.peak, "explain_waits": self.explain_waits}
+
+
+BUDGET_KIND = "demo budget reached"
+BUDGET_MESSAGE = "Demo budget reached: AI explanations paused until tomorrow"
+
+
+def call_cost(model: str, usage: Any) -> Fraction:
+    """USD for one call. An unknown model is priced like the dearest known one (for the budget)."""
+    p = int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
+    c = int(getattr(usage, "completion_tokens", 0) or 0) if usage else 0
+    pi, po = PRICES_USD.get(model) or max(PRICES_USD.values(), key=lambda x: x[1])
+    return pi * p + po * c
+
+
+class DailyBudget:
+    """A daily spending cap for the model (LLM_DAILY_BUDGET_USD, UTC days; <= 0 = no cap).
+    When reached, every model call is refused as unavailable: the fast-path check goes to full
+    simulation and explanations pause. Never a switch to the mock. Kept in a small JSON file
+    (LLM_BUDGET_FILE) so a restart does not reset it; in memory if no file is set. Up to
+    LLM_CONCURRENCY calls already in flight may finish after the cap is reached."""
+
+    def __init__(self, limit_usd: float, path: str = "", today=None):
+        self.limit = Fraction(str(limit_usd))
+        self.path = Path(path) if path else None
+        self.today = today or (lambda: time.strftime("%Y-%m-%d", time.gmtime()))
+        self._lock = threading.Lock()
+        self._day, self._spent = self.today(), Fraction(0)
+        if self.path and self.path.exists():
+            try:
+                d = json.loads(self.path.read_text(encoding="utf-8"))
+                self._day, self._spent = str(d["day"]), Fraction(str(d["spent_usd"]))
+            except (ValueError, KeyError, OSError):
+                log.warning("budget file unreadable: starting today's count at 0")
+
+    def _roll(self) -> None:
+        day = self.today()
+        if day != self._day:
+            self._day, self._spent = day, Fraction(0)
+
+    def reached(self) -> bool:
+        if self.limit <= 0:
+            return False
+        with self._lock:
+            self._roll()
+            return self._spent >= self.limit
+
+    def add(self, usd: Fraction) -> None:
+        with self._lock:
+            self._roll()
+            self._spent += usd
+            if self.path:
+                try:
+                    self.path.parent.mkdir(parents=True, exist_ok=True)
+                    tmp = self.path.with_suffix(".tmp")
+                    tmp.write_text(json.dumps({"day": self._day, "spent_usd": str(self._spent)}), encoding="utf-8")
+                    tmp.replace(self.path)
+                except OSError:
+                    log.warning("could not save the budget file")
+
+    def snapshot(self) -> dict[str, Any]:
+        reached = self.reached()
+        with self._lock:
+            return {"limit_usd": float(self.limit), "spent_today_usd": round(float(self._spent), 4),
+                    "day": self._day, "reached": reached}
 
 
 class LLMUsage:
@@ -338,6 +413,7 @@ class LLMExplainer:
         self._client = client
         self.usage = LLMUsage()
         self.slots = CallSlots(settings.llm_concurrency)  # shared by fast-path checks and explanations
+        self.budget = DailyBudget(settings.llm_daily_budget_usd, settings.llm_budget_file)
 
     @property
     def model_label(self) -> str:
@@ -422,9 +498,13 @@ class LLMExplainer:
         attempts = 1 + max(0, s.llm_max_retries if retries is None else retries)
         kind = "error"
         for i in range(1, attempts + 1):
+            if self.budget.reached():  # never the mock instead: the caller treats this as unavailable
+                kind = BUDGET_KIND
+                break
             try:
                 resp = self.client.chat.completions.create(**kwargs)
                 self.usage.add(model, getattr(resp, "usage", None))
+                self.budget.add(call_cost(model, getattr(resp, "usage", None)))
                 out = parse_assessment(resp.choices[0].message.content)
                 self.usage.attempt(None, model)
                 return out.model_copy(update={"model": model})

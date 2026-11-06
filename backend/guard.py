@@ -38,7 +38,7 @@ from app.config import Settings
 from app.models import Decision, LLMAssessment, Path, SimulationResult, TxRequest, Verdict, WalletType
 from decode import Decoded, Kind, authority_of, decode
 from history import CheckRecord, History
-from llm import CallSlots, LLMUnavailable
+from llm import BUDGET_MESSAGE, CallSlots, LLMUnavailable
 from policies.engine import RuleContext, block, decide, run_rules
 from policies.fmt import over_pct
 from policies.request_rules import REQUEST_RULES
@@ -306,7 +306,7 @@ class Guard:
         try:
             return self._escalation_check(tx)
         finally:
-            self._ai_slots.release()
+            self._ai_slots.release(fast=True)
 
     def _escalation_check(self, tx: TxRequest) -> tuple[LLMAssessment | None, str]:
         """The fast-path AI check: the assessment, or None and why it is unavailable."""
@@ -338,8 +338,17 @@ class Guard:
             "model": (llm.model if llm is not None and llm.model else self.settings.vultr_model),
             **({"intent_summary": llm.intent_summary, "risk_score": llm.risk_score,
                 "explanation": llm.explanation, "escalate": llm.escalate, "mock": llm.mock} if llm else
-               {"reason": "LLM unavailable: no explanation; the verdict is the same"})})
+               {"reason": self._unavailable_reason(), "budget": self._budget_reached()})})
         return llm
+
+    def _budget_reached(self) -> bool:
+        budget = getattr(self.explainer, "budget", None)
+        return bool(budget is not None and budget.reached())
+
+    def _unavailable_reason(self) -> str:
+        if self._budget_reached():
+            return BUDGET_MESSAGE
+        return "LLM unavailable: no explanation; the verdict is the same"
 
     def _explain(self, tx: TxRequest, sim: SimulationResult | None) -> LLMAssessment | None:
         try:

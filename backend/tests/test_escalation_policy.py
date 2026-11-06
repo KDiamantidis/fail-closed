@@ -142,24 +142,64 @@ def test_cap_waits_within_the_budget_for_a_free_slot():
 # ---- one shared limit: fast-path checks before explanations -----------------------------------
 
 def test_one_shared_limit_fast_checks_before_explanations():
-    """Explanations fill the slots; a fast-path check that arrives then gets the next free slot
-    before an explanation that was already waiting."""
+    """With 2 slots, explanations use at most 1. A fast-path check that arrives while the only
+    other slot is taken gets the next free slot before an explanation that was already waiting."""
     slots = CallSlots(2)
     order: list[str] = []
-    assert slots.acquire(fast=False) and slots.acquire(fast=False)  # 2 explanations running
+    assert slots.acquire(fast=False) and slots.acquire(fast=True)  # 1 explanation + 1 check running
     waiting = threading.Thread(target=lambda: (slots.acquire(fast=False), order.append("explain")))
     waiting.start()
     time.sleep(0.05)
     fast = threading.Thread(target=lambda: order.append("fast" if slots.acquire(fast=True, timeout=2) else "none"))
     fast.start()
     time.sleep(0.05)
-    slots.release()  # one slot frees: the fast check gets it, the explanation keeps waiting
+    slots.release(fast=True)  # the check's slot frees: the next check gets it, the explanation waits
     fast.join(2)
     time.sleep(0.05)
     assert order == ["fast"]
-    slots.release()
+    slots.release(fast=False)  # the running explanation ends: the waiting one may start
     waiting.join(2)
     assert order == ["fast", "explain"] and slots.snapshot()["explain_waits"] == 1
+
+
+def test_explanations_never_take_the_last_slot():
+    """3 shared slots: at most 2 explanations at once, so a check always finds one free slot."""
+    slots = CallSlots(3)
+    assert slots.snapshot()["explain_max"] == 2
+    assert slots.acquire(fast=False) and slots.acquire(fast=False)
+    assert slots.acquire(fast=False, timeout=0.2) is False  # a third explanation waits
+    t0 = time.monotonic()
+    assert slots.acquire(fast=True, timeout=2) and time.monotonic() - t0 < 0.1  # the check goes at once
+    snap = slots.snapshot()
+    assert (snap["in_use"], snap["explaining"]) == (3, 2)
+    for fast in (True, False, False):
+        slots.release(fast=fast)
+    assert slots.snapshot()["in_use"] == 0
+
+
+def test_busy_explanations_leave_a_slot_for_the_large_amount_check():
+    """The 2026-11-06 live run: 3 explanations held all 3 slots and a check missed its 2 s. Now
+    two slow explanations run, and the check gets the third slot on the fast path."""
+    release = threading.Event()
+
+    def slow_explanations(**kw):
+        if kw["model"] == "glm-5.3":
+            release.wait(5)
+        return no_concerns()
+
+    g = guard(slow_explanations, llm_concurrency=3, fast_path_llm_timeout_seconds=1.0)
+    first = [g.check(req(to="0x" + f"{0xe0 + i:02x}" * 20)) for i in range(3)]  # 3 new destinations
+    try:
+        deadline = time.monotonic() + 3
+        while g.explainer.slots.snapshot()["explaining"] < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert g.explainer.slots.snapshot()["explaining"] == 2  # the third explanation waits in line
+        r = g.check(req(value=BIG))
+        assert r.verdict.path is Path.FAST and r.verdict.path_reasons[-1] == "LLM: no escalation"
+    finally:
+        release.set()
+        for x in first:
+            x.explanation.result(timeout=10)
 
 
 def test_fast_check_without_a_slot_in_time_gives_up():
