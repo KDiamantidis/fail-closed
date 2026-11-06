@@ -5,8 +5,8 @@
 <title>Fail Closed slides</title>
 <!-- 10 slides, 1920x1080 each. Exported to fail-closed.pdf by docs/slides/export.py.
      Same colours and fonts as the web UI and docs/brand.
-     Rule: every number about the real incidents carries [VERIFY]; every measured number says
-     where and how it was measured. -->
+     Incident facts as checked against public sources; every measured number says where and how
+     it was measured. -->
 <style>
   @font-face { font-family: "Inter"; font-weight: 400; src: url("../brand/fonts/inter-latin-400-normal.woff2") format("woff2"); }
   @font-face { font-family: "Inter"; font-weight: 500; src: url("../brand/fonts/inter-latin-500-normal.woff2") format("woff2"); }
@@ -34,7 +34,7 @@
   ul.big li { font-size: 38px; line-height: 1.35; color: var(--body); padding-left: 44px; position: relative; }
   ul.big li::before { content: ""; position: absolute; left: 0; top: 18px; width: 16px; height: 16px; border-radius: 50%; background: var(--brand); }
   b { color: var(--ink); font-weight: 600; }
-  .v { display: inline-block; margin-left: 6px; padding: 1px 9px; border-radius: 8px; font-size: 0.55em; font-weight: 700;
+  .v { display: none; margin-left: 6px; padding: 1px 9px; border-radius: 8px; font-size: 0.55em; font-weight: 700;
        vertical-align: 0.35em; color: var(--held); background: var(--held-bg); border: 1px solid var(--held-line); letter-spacing: 0.03em; }
   .foot { position: absolute; left: 120px; right: 120px; bottom: 56px; display: flex; justify-content: space-between;
           align-items: flex-end; gap: 40px; font-size: 22px; color: var(--muted); }
@@ -73,20 +73,20 @@
   <h2>Two real attacks. The signer signed what it was asked.</h2>
   <div style="margin-top:48px;display:grid;grid-template-columns:1fr 1fr;gap:40px">
     <div class="card">
-      <p style="font-size:32px;font-weight:700;color:var(--ink)">Binance · 29 Oct 2026<span class="v">VERIFY</span></p>
+      <p style="font-size:32px;font-weight:700;color:var(--ink)">Binance · 29 Oct 2026</p>
       <p style="margin-top:6px;font-size:26px;font-weight:600;color:var(--brand)">Hot wallet delegation drain (EIP-7702)</p>
       <ul style="margin-top:22px;font-size:29px;line-height:1.42;padding-left:30px;display:grid;gap:12px">
-        <li>About $6.3 billion<span class="v">VERIFY</span> left hot wallets on about 10 chains<span class="v">VERIFY</span>.</li>
-        <li>One transaction carried 50 delegation authorizations<span class="v">VERIFY</span>: the wallet was handed to the attacker's contract.</li>
-        <li>No private key leaked<span class="v">VERIFY</span>. A compromised internal service asked, and the signer signed.</li>
+        <li>About $6.3 billion left hot wallets on about 10 chains.</li>
+        <li>One Ethereum transaction carried 50 EIP-7702 authorizations for 50 consecutive nonces; one matched and handed the wallet to the attacker's contract (Blockaid).</li>
+        <li>Binance says it found no evidence of a private key leak; the investigation is ongoing.</li>
       </ul>
     </div>
     <div class="card">
-      <p style="font-size:32px;font-weight:700;color:var(--ink)">Mercado Bitcoin · 2 Nov 2026<span class="v">VERIFY</span></p>
+      <p style="font-size:32px;font-weight:700;color:var(--ink)">Mercado Bitcoin · 2 Nov 2026</p>
       <p style="margin-top:6px;font-size:26px;font-weight:600;color:var(--brand)">Multi-chain drain after key theft</p>
       <ul style="margin-top:22px;font-size:29px;line-height:1.42;padding-left:30px;display:grid;gap:12px">
-        <li>No delegation trick: plain signed transfers.</li>
-        <li>One address was paid on 10 chains<span class="v">VERIFY</span>, about 185 tokens<span class="v">VERIFY</span>, one by one.</li>
+        <li>About $38–49M (estimates vary), in plain signed transfers.</li>
+        <li>Attacker addresses on at least 10 chains; hundreds of tokens (about 185 on Ethereum alone).</li>
         <li>Each transfer looked normal on its own.</li>
       </ul>
     </div>
@@ -100,7 +100,7 @@
   <p class="kicker">The cost nobody counts</p>
   <h2>After the attack, everyone waits.</h2>
   <ul class="big">
-    <li>Both exchanges stopped withdrawals <b>for all customers</b><span class="v">VERIFY</span>, for days<span class="v">VERIFY</span>.</li>
+    <li>Both exchanges paused withdrawals <b>for all customers</b>.</li>
     <li>Honest customers pay for the attack too: their money is stuck.</li>
     <li>A full stop is the only tool when nothing narrower exists.</li>
     <li><b>A guard should stop the attacker, not the business.</b></li>
@@ -130,7 +130,50 @@
   <span class="num">5</span>
 </section>
 
-<!-- 6. Demo 1 -->
+<!-- 6. Where Fail Closed fits -->
+<section class="slide" style="padding-top:72px">
+  <p class="kicker">Where Fail Closed fits</p>
+  <h2 style="font-size:56px">The enforcement point exists. Fail Closed is a prototype of the decision logic.</h2>
+  <div style="margin-top:34px;display:grid;grid-template-columns:repeat(3,1fr);gap:28px">
+    <div class="card" style="padding:28px 30px">
+      <p style="font-size:27px;font-weight:700;color:var(--ink)">Screening before signing</p>
+      <p style="margin-top:10px;font-size:23px;line-height:1.42">Threat intelligence and pre-signing checks already exist as products: <b>Blockaid Cosigner</b>, <b>Hypernative Transaction Guard</b>.</p>
+    </div>
+    <div class="card" style="padding:28px 30px">
+      <p style="font-size:27px;font-weight:700;color:var(--ink)">Signer hooks</p>
+      <p style="margin-top:10px;font-size:23px;line-height:1.42"><b>DFNS Validation Gate</b>, <b>Fireblocks API Co-signer Callback Handler</b>, <b>Fordefi Custom API Approver</b> give the enforcement point. The customer writes the decision logic.</p>
+    </div>
+    <div class="card" style="padding:28px 30px;border-color:#99e6d4;background:var(--brand-tint)">
+      <p style="font-size:27px;font-weight:700;color:var(--ink)">Fail Closed</p>
+      <p style="margin-top:10px;font-size:23px;line-height:1.42">A prototype of that decision logic: fixed rules decide, unusual requests run in an isolated sandbox, every failure fails closed, a scoped circuit breaker, the AI only explains.</p>
+    </div>
+  </div>
+  <div style="margin-top:28px;display:grid;grid-template-columns:1fr 1fr;gap:28px">
+    <div>
+      <p style="font-size:25px;font-weight:700;color:var(--brand)">Built in this prototype</p>
+      <ul style="margin-top:10px;font-size:22px;line-height:1.4;padding-left:26px;display:grid;gap:4px">
+        <li>Fixed rules decide; the AI explains and may ask for a deeper check</li>
+        <li>Isolated sandbox: state diff and a delegation probe</li>
+        <li>Fails closed on every error, timeout or empty result</li>
+        <li>Scoped circuit breaker: address, wallet, chain, global</li>
+        <li>Approval bound to the request hash; the signer checks it</li>
+      </ul>
+    </div>
+    <div>
+      <p style="font-size:25px;font-weight:700;color:var(--muted)">Next (not built)</p>
+      <ul style="margin-top:10px;font-size:22px;line-height:1.4;padding-left:26px;display:grid;gap:4px">
+        <li>Plug into one real signer hook</li>
+        <li>Check every signature against an approved withdrawal in the exchange ledger (separate trust domain)</li>
+        <li>Deny unknown operation types on withdrawal wallets (e.g. EIP-7702 delegation)</li>
+        <li>Rules for deposit-address sweeps</li>
+        <li>A pre-approved path to revoke a bad EIP-7702 delegation that the breaker never blocks</li>
+      </ul>
+    </div>
+  </div>
+  <span class="num">6</span>
+</section>
+
+<!-- 7. Demo 1 -->
 <section class="slide" style="padding-top:72px">
   <p class="kicker">Demo 1 · Hot wallet delegation drain</p>
   <h2 style="font-size:60px">Blocked. Nothing was signed.</h2>
@@ -142,10 +185,10 @@
       <li style="font-size:31px">No approval, so <b>the signer refuses</b>. The wallet is paused.</li>
     </ul>
   </div>
-  <span class="num">6</span>
+  <span class="num">7</span>
 </section>
 
-<!-- 7. Demo 2 -->
+<!-- 8. Demo 2 -->
 <section class="slide" style="padding-top:72px">
   <p class="kicker">Demo 2 · Coordinated attack</p>
   <h2 style="font-size:60px">The risk level climbs 0 → 4, one narrow step at a time.</h2>
@@ -167,10 +210,10 @@
       <li style="font-size:29px">Level 4 needs <b>two independent signals</b>. Only an operator lifts it, with the admin token.</li>
     </ul>
   </div>
-  <span class="num">7</span>
+  <span class="num">8</span>
 </section>
 
-<!-- 8. Measured results -->
+<!-- 9. Measured results -->
 <section class="slide" style="padding-top:72px">
   <p class="kicker">Measured results</p>
   <h2 style="font-size:60px">500 normal withdrawals + 1 hidden attack</h2>
@@ -189,10 +232,10 @@
   <p class="note" style="margin-top:26px">Measured on a laptop (Windows 11, 16 CPUs, Docker Desktop), 6 Nov 2026, with <span class="mono">backend/cli.py loadtest</span>:
     mock AI (800 ms per call) for the 500 + 1; real Vultr <span>glm-5.3-flash</span> for the 49 + 1. Red team: the browser test run of 6 Nov 2026.
     Not yet measured on the Vultr VM. Data: <span>docs/results/</span>.</p>
-  <span class="num">8</span>
+  <span class="num">9</span>
 </section>
 
-<!-- 9. Business value -->
+<!-- 10. Business value -->
 <section class="slide">
   <p class="kicker">Business value</p>
   <h2>Protect the wallets without stopping normal customers.</h2>
@@ -203,10 +246,10 @@
     <li>The breaker stops <b>as little as possible</b>: address, then wallet, then chain.</li>
     <li>In our load test: <b>0 of 500</b> normal customers refused (laptop, mock AI, 6 Nov 2026).</li>
   </ul>
-  <span class="num">9</span>
+  <span class="num">10</span>
 </section>
 
-<!-- 10. Honest limits + next -->
+<!-- 11. Honest limits + next -->
 <section class="slide">
   <p class="kicker">Honest limits · What's next</p>
   <div style="margin-top:28px;display:grid;grid-template-columns:1fr 1fr;gap:40px">
@@ -222,15 +265,16 @@
     <div class="card">
       <p style="font-size:38px;font-weight:700;color:var(--ink)">What's next</p>
       <ul style="margin-top:22px;font-size:29px;line-height:1.42;padding-left:30px;display:grid;gap:14px">
-        <li>A real co-signer in MPC or multisig wallets, and in HSMs.</li>
-        <li>Non-EVM chains.</li>
-        <li>Simulation on a mainnet fork.</li>
-        <li>A watchtower that spots a hijacked wallet and stops its top-ups.</li>
+        <li>Plug into one real signer hook (e.g. an MPC or HSM co-signer callback).</li>
+        <li>Check every signature against an approved withdrawal in the exchange ledger, from a separate trust domain.</li>
+        <li>Deny unknown operation types on withdrawal wallets (e.g. EIP-7702 delegation).</li>
+        <li>Rules for deposit-address sweeps.</li>
+        <li>A pre-approved path to revoke a bad EIP-7702 delegation that the breaker never blocks.</li>
       </ul>
     </div>
   </div>
   <p style="margin-top:44px;font-size:44px;font-weight:600;color:var(--brand)">No approval, no signature.</p>
-  <span class="num">10</span>
+  <span class="num">11</span>
 </section>
 
 </body>

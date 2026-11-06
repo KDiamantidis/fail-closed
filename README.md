@@ -27,23 +27,23 @@ Two public incidents inspired this project. Each one shows a class of attack.
 
 | Incident | Attack class | In the demo |
 |---|---|---|
-| **Binance**, 29 Oct 2026 [VERIFY] | **Hot wallet delegation drain (EIP-7702).** A compromised service gets the signer to sign authorizations that hand a hot wallet to an attacker's contract. The contract then empties it. | Replay (d) |
-| **Mercado Bitcoin**, 2 Nov 2026 [VERIFY] | **Multi-chain drain after key theft.** Plain transfers send everything to one address on many chains, token by token. | Replay (e) |
+| **Binance**, 29 Oct 2026 | **Hot wallet delegation drain (EIP-7702).** A compromised service gets the signer to sign authorizations that hand a hot wallet to an attacker's contract. The contract then empties it. | Replay (d) |
+| **Mercado Bitcoin**, 2 Nov 2026 | **Multi-chain drain after key theft.** Plain signed transfers send the funds to attacker addresses on many chains, token by token. | Replay (e) |
 
 Fail Closed is designed to reject this class of attack. We do not claim it would have stopped these incidents.
 
-What was reported (numbers not yet checked are marked [VERIFY]):
+What was reported (sources at the end):
 
-- **Binance.** About $6.3 billion [VERIFY] left hot wallets on about 10 blockchains [VERIFY], most
-  of it in about 20 minutes [VERIFY]. A DevOps engineer's laptop was compromised, and from there
-  the attacker reached a service that submits withdrawals. No private keys were leaked [VERIFY]:
-  the signing system signed what it was asked to sign. On Ethereum, one transaction carried
-  50 EIP-7702 authorizations [VERIFY], one for each of 50 consecutive nonces [VERIFY]. One
-  matched, and the wallet started running an attacker contract. On the other chains, funds left
-  through plain signed transfers.
-- **Mercado Bitcoin.** No EIP-7702: plain signed transfers. One address was paid on 10 chains
-  [VERIFY], about 185 tokens [VERIFY] one by one.
-- **Both exchanges** then stopped withdrawals for all customers [VERIFY], for days [VERIFY].
+- **Binance.** About $6.3 billion left hot wallets on about 10 blockchains. A DevOps engineer's
+  laptop was compromised, and from there the attacker reached a service that submits
+  withdrawals. Binance says it found no evidence of a private key leak; the investigation is
+  ongoing. The signing system signed what it was asked to sign. On Ethereum, one transaction
+  carried 50 EIP-7702 authorizations for 50 consecutive nonces; only one matched, and the wallet
+  started running an attacker contract (Blockaid). On the other chains, funds left through plain
+  signed transfers.
+- **Mercado Bitcoin.** About $38–49M (estimates vary). No EIP-7702: plain signed transfers to
+  attacker addresses on at least 10 chains, hundreds of tokens (about 185 on Ethereum alone).
+- **Both exchanges** then paused withdrawals for all customers.
 
 The common problem: **the signer trusted where a request came from, and never checked what it
 would do.** And when the only defence is a full stop, every honest customer pays too.
@@ -131,6 +131,33 @@ the admin token. Colours always come with text and an icon, with WCAG AA contras
 4. The signer knows only the Guard's public key. It signs only with a valid, unexpired, unused
    approval for exactly this request. Anything else is refused with a reason.
 
+## Where Fail Closed fits
+
+Fail Closed is a prototype, not a product. Parts of this space already exist:
+
+- **Threat intelligence and pre-signing screening** exist as products, for example
+  [Blockaid Cosigner](https://blockaid.io/cosigner) and
+  [Hypernative Transaction Guard](https://www.hypernative.io/product/transaction-guard).
+- **Signer hooks** where a customer adds its own last check before signing exist too:
+  [DFNS Validation Gate](https://dfns.co/article/introducing-validation-gate),
+  [Fireblocks API Co-signer Callback Handler](https://developers.fireblocks.com/reference/api-cosigner-setup-callback-handler) and
+  [Fordefi Custom API Approver](https://docs.fordefi.com/developers/transaction-types/build-custom-api-approver).
+  They give the enforcement point; the customer writes the decision logic.
+- **Fail Closed is a prototype of that decision logic:** fixed rules decide, unusual requests run
+  in an isolated sandbox, every failure fails closed, a scoped circuit breaker limits the damage,
+  and the AI only explains.
+
+We describe these products only from the public pages linked above. Where a feature is not
+mentioned, it is not publicly documented in the sources we read; we make no claim beyond that.
+
+| Built in this prototype | Next (not built) |
+|---|---|
+| Fixed rules decide; the AI explains and may ask for a deeper check | Plug into one real signer hook |
+| Isolated sandbox: state diff and a delegation probe | Check that every signature matches an approved withdrawal in the exchange ledger, from a separate trust domain |
+| Fails closed on every error, timeout or empty result | Deny unknown operation types on withdrawal wallets (for example EIP-7702 delegation) |
+| Scoped circuit breaker (address, wallet, chain, global), every reset logged | Rules for deposit-address sweeps |
+| A Guard approval bound to the request hash; the signer checks it | A pre-approved path to revoke a bad EIP-7702 delegation that the breaker never blocks |
+
 ## Vultr services used
 
 | Service | What it does here |
@@ -138,8 +165,8 @@ the admin token. Colours always come with text and an icon, with WCAG AA contras
 | **Vultr Serverless Inference** | `glm-5.3-flash` (reasoning effort minimal, JSON mode): the fast-path AI check, only for large amounts to known customers, 2 s budget. `glm-5.3`: the explanation card after a slow-path check (20 s timeout, falls back to `glm-5.3-flash`). The AI explains and may escalate to the sandbox; it never decides. Capped at 3 calls at once and $1 a day in the public demo. |
 | **Vultr Cloud Compute** | One VM runs everything else: Caddy (HTTPS), the Guard API on the host as a limited user, the sandboxes (Docker + Anvil, rootless Docker), SQLite history and the web UI. Plan: `docs/deploy.md`. |
 
-Why `glm-5.3-flash` for checks: in our comparison it was the only model that answered every
-check within 2 s (table below).
+Why `glm-5.3-flash` for checks: in our comparison it answered all 24 checks within 2 s; the
+other setups answered 5–12 of 24 in time (table below).
 
 ## Results
 
@@ -310,17 +337,27 @@ The cover, diagram and slides are rebuilt with `docs/brand/export.py` and `docs/
 
 ## License
 
-Not chosen yet. Until a license is added, all rights are reserved by the author. The fonts in
-`docs/brand/fonts` are under the SIL Open Font License (see the files there).
+MIT, see [LICENSE](LICENSE). The fonts in `docs/brand/fonts` are under the SIL Open Font License
+(see the files there).
 
 ---
 
 More: [design log](docs/design-log.md) · [deploy plan](docs/deploy.md) · [load-test data](docs/results/)
 
-Sources for the incidents (to be checked, see [VERIFY] above):
-TRM Labs, [North Korea steals USD 6.36 billion from Binance](https://www.trmlabs.com/resources/blog/north-korea-steals-usd-6-36-billion-from-binance-in-the-largest-hack-in-history) ·
-BleepingComputer, [Binance links theft to compromised DevOps laptop](https://bleepingcomputer.com/news/security/binance-links-63-billion-crypto-theft-to-compromised-devops-laptop) ·
-DEV Community, [50 signatures and a 37-minute race](https://dev.to/thevenice/how-a-53b-binance-hot-wallet-hack-worked-eip-7702-50-signatures-and-a-37-minute-race-2lea).
-No source is listed yet for the Mercado Bitcoin incident.
+## Sources
+
+Incidents:
+- TRM Labs, [North Korea steals USD 6.36 billion from Binance](https://www.trmlabs.com/resources/blog/north-korea-steals-usd-6-36-billion-from-binance-in-the-largest-hack-in-history)
+- BleepingComputer, [Binance links theft to compromised DevOps laptop](https://bleepingcomputer.com/news/security/binance-links-63-billion-crypto-theft-to-compromised-devops-laptop)
+- DEV Community, [50 signatures and a 37-minute race](https://dev.to/thevenice/how-a-53b-binance-hot-wallet-hack-worked-eip-7702-50-signatures-and-a-37-minute-race-2lea)
+- Blockaid's analysis of the EIP-7702 authorizations (cited in the text; link to be added)
+- Mercado Bitcoin: link to be added
+
+Products in "Where Fail Closed fits":
+- DFNS, [Introducing Validation Gate](https://dfns.co/article/introducing-validation-gate)
+- Fireblocks, [API Co-signer callback handler](https://developers.fireblocks.com/reference/api-cosigner-setup-callback-handler)
+- Fordefi, [Build a custom API approver](https://docs.fordefi.com/developers/transaction-types/build-custom-api-approver)
+- Blockaid, [Cosigner](https://blockaid.io/cosigner)
+- Hypernative, [Transaction Guard](https://www.hypernative.io/product/transaction-guard)
 
 Author: Konstantinos Diamantidis · Computer Science, Democritus University of Thrace · [github.com/KDiamantidis](https://github.com/KDiamantidis)
