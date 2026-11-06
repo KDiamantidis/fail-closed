@@ -337,6 +337,9 @@ class WarmPool:
             with self._lock:
                 if len(self._idle) >= self.size:
                     return
+            if self.runner.low_memory():  # RAM guard: no new warm containers while memory is low
+                log.warning("warm pool: free memory below the floor, not starting another container")
+                return
             try:
                 lease = self.new()
             except Exception as e:  # noqa: BLE001 - checks fall back to starting one themselves
@@ -413,6 +416,8 @@ class SandboxRunner:
         self._artifacts: dict[str, str] = {}
         self._slots: dict[str, str] = {}
         self._started_lock = threading.Lock()
+        from sandbox_gate import low_memory_check  # RAM guard: the pool starts no container while low
+        self.low_memory = low_memory_check(getattr(settings, "ram_guard_min_free_gb", 0.0))
         self.pool: WarmPool | None = None
         if settings.sandbox_mode == "warm":
             self.pool = WarmPool(self, settings.sandbox_pool_size, settings.sandbox_max_uses,

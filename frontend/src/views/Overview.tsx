@@ -23,7 +23,7 @@ function outcome(run: Run | undefined) {
   if (!run) return null;
   if (run.status === "running") return <span className="flex items-center gap-1.5 text-[12px] text-muted"><Spinner /> Running…</span>;
   if (run.status === "error") return <span className="text-[12px] text-bad" role="alert">
-    {/^Too many/.test(run.error ?? "") ? run.error : `Failed: ${run.error}`}</span>;
+    {/^(Too many|Guard busy)/.test(run.error ?? "") ? run.error : `Failed: ${run.error}`}</span>;
   const checks = (run.result?.results ?? []).filter((x: any) => x.check);
   const counts: Record<string, number> = {};
   for (const x of checks) counts[x.check.verdict] = (counts[x.check.verdict] ?? 0) + 1;

@@ -101,6 +101,8 @@ function Start-PlanB {
   $env:REDTEAM_PUBLIC = "false"
   $env:SANDBOX_MODE = "warm"
   $env:SANDBOX_OWNER = $Owner
+  $env:SANDBOX_POOL_SIZE = "2"                    # laptop: 2 warm sandboxes (the VM keeps 4)
+  $env:RAM_GUARD_MIN_FREE_GB = "0.75"             # below this, new sandbox work waits, then "Guard busy"
   $env:HISTORY_DB = (Join-Path $Run "history.sqlite3")
   $env:SIGNER_DB = (Join-Path $Run "signer.sqlite3")
   $env:RATE_REPLAYS_PER_MINUTE = "10"

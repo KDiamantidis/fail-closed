@@ -50,7 +50,7 @@ from loadtest import run_config
 from redteam import RedTeam
 from holds import HoldError, HoldManager
 from llm import LLMExplainer
-from sandbox_gate import GuardBusy, SandboxGate
+from sandbox_gate import GuardBusy, SandboxGate, low_memory_check
 from sandbox_runner import SandboxRunner
 from scenario import discover, load, merged_policy, merged_state
 from signer_mock import MockSigner, ReplayStore
@@ -255,7 +255,9 @@ class Services:
         guard = Guard(settings, history, StaticStateProvider(merged_state(scenarios)),
                       SandboxRunner(settings), LLMExplainer(settings), breaker=Breaker(history, settings),
                       events=lambda cid, kind, data: bus.publish(cid, kind, data, run_id="main"),
-                      gate=SandboxGate(settings.sandbox_max_concurrent, settings.sandbox_queue_seconds))
+                      gate=SandboxGate(settings.sandbox_max_concurrent, settings.sandbox_queue_seconds,
+                                       low_memory=low_memory_check(settings.ram_guard_min_free_gb),
+                                       min_free_gb=settings.ram_guard_min_free_gb))
         key = GuardKey.load_or_create(settings.guard_key_path)
         approver = Approver(key, settings.approval_ttl_seconds)
         signer = MockSigner(key.public_key_hex, ReplayStore(settings.signer_db))  # public key only
