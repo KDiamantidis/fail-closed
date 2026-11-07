@@ -41,6 +41,10 @@ a paused wallet is blocked at once. A scoped circuit breaker stops as little as 
 address, wallet or chain; everything only with two independent signals. The AI explains each
 decision. It never decides.
 
+For Challenge 1, the Guard is the control layer: it plans the check, dispatches the transaction into
+an isolated sandbox, and verifies the real executed output with fixed rules. Each sandbox is
+isolated, holds no secrets, has hard resource limits and is destroyed after the check.
+
 **What runs on Vultr.** Vultr Serverless Inference runs the AI: glm-5.3-flash for the fast check
 of large amounts, glm-5.3 for the explanation card. [WHERE: choose one line below.]
 

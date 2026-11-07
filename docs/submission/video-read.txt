@@ -23,13 +23,14 @@ It never decides.
 
 A plain payout to a known customer passes the rules in milliseconds.
 Anything unusual runs first in an isolated sandbox, with no network and no secrets.
+The Guard plans each check, runs it in the sandbox, and verifies the real output with fixed rules.
 The rule engine decides: allow, delay, needs review, or block.
 Only an allow gets a signed approval, and the signer signs only with that approval.
 The AI runs on Vultr [vulture]. It explains, and it may ask for a closer look.
 [READ IF THE VM WORKED] The Guard and the sandboxes run on a Vultr [vulture] Cloud Compute VM. The AI runs on Vultr Serverless Inference.
 [READ IF PLAN B] Our Vultr [vulture] VM was blocked by account review, so today the Guard runs on my laptop. The AI still runs on Vultr Serverless Inference.
 
-1:50
+2:00
 
 A compromised service asks the hot wallet to sign five delegation authorizations.
 Blocked.
@@ -41,7 +42,7 @@ The AI explains in plain words.
 It did not decide.
 The risk strip is now orange: High, one wallet paused.
 
-2:22
+2:32
 
 Now several wallets and chains are attacked.
 Watch the risk level.
@@ -52,14 +53,14 @@ Customers outside the stopped scope keep being paid.
 Level four, the global stop, needs two independent signals.
 Only an operator can lift it, with the admin token.
 
-2:52
+3:02
 
 We also attack the sandbox itself.
 It cannot reach the internet, find keys or secrets, change files, or gain privileges.
 A fork bomb, a memory bomb and a CPU that spins forever are all stopped.
 Seven of seven are contained.
 
-3:14
+3:24
 
 We measured five hundred normal withdrawals and one hidden attack, on a laptop.
 The attack was stopped.
@@ -68,19 +69,19 @@ Plain payouts take about three milliseconds.
 A sandbox check takes one to three seconds.
 So normal customers keep being paid, and the breaker stops as little as possible.
 
-3:41
+3:51
 
 Signer hooks already exist.
 Fail Closed is a prototype of the decision logic behind them.
 
-3:50
+4:00
 
 This is a prototype on a test chain with fake funds.
 It does not stop the first break-in.
 It stops that break-in from getting a signature.
 Next: a real signer hook, and checking every signature against the exchange ledger.
 
-4:11
+4:21
 
 Fail Closed.
 No approval, no signature.

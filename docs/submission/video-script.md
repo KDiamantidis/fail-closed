@@ -1,4 +1,4 @@
-# Video script (target about 4:20)
+# Video script (target about 4:25)
 
 Read slowly. One sentence at a time. **[CLICK]** = what to do on screen. Words in [brackets]
 are how to say a hard word; do not read them. Times are speaking time at 110 words per minute;
@@ -46,6 +46,7 @@ Spoken lines only, for reading: `docs/submission/video-read.txt`.
 
 > A plain payout to a known customer passes the rules in milliseconds.
 > Anything unusual runs first in an isolated sandbox, with no network and no secrets.
+> The Guard plans each check, runs it in the sandbox, and verifies the real output with fixed rules.
 > The rule engine decides: allow, delay, needs review, or block.
 > Only an allow gets a signed approval, and the signer signs only with that approval.
 > The AI runs on Vultr [vulture]. It explains, and it may ask for a closer look.
@@ -57,7 +58,7 @@ Spoken lines only, for reading: `docs/submission/video-read.txt`.
 > **If Plan B (laptop):** Our Vultr [vulture] VM was blocked by account review, so today the Guard runs on my laptop. The AI still runs on Vultr Serverless Inference.
 
 
-## 1:50 · Demo 1: delegation drain
+## 2:00 · Demo 1: delegation drain
 
 **[CLICK]** Switch to the app, page **Overview**. The risk strip at the top says "Normal".
 **[CLICK]** Card **Incident replays** → **Run replay** next to **Hot wallet delegation drain (EIP-7702)**.
@@ -84,7 +85,7 @@ Spoken lines only, for reading: `docs/submission/video-read.txt`.
 
 > The risk strip is now orange: High, one wallet paused.
 
-## 2:22 · Demo 2: coordinated attack, risk level 0 to 4
+## 2:32 · Demo 2: coordinated attack, risk level 0 to 4
 
 **[CLICK]** Sidebar **Overview**. In the card **Incident replays**, click **Reset demo**. The strip says "Normal".
 **[CLICK]** **Run replay** next to **Coordinated attack on several wallets and chains**. Point at the strip while it changes colour (it may change in steps every 2 s).
@@ -104,7 +105,7 @@ Spoken lines only, for reading: `docs/submission/video-read.txt`.
 **[CLICK]** Click **Reset demo** (in the banner or in the card **Incident replays**).
 
 
-## 2:52 · Containment
+## 3:02 · Containment
 
 **[CLICK]** Sidebar **Containment** (page "Sandbox isolation report"; it shows the saved run).
 
@@ -113,7 +114,7 @@ Spoken lines only, for reading: `docs/submission/video-read.txt`.
 > A fork bomb, a memory bomb and a CPU that spins forever are all stopped.
 > Seven of seven are contained.
 
-## 3:14 · Measured results and business value (slides 9 and 10)
+## 3:24 · Measured results and business value (slides 9 and 10)
 
 **[CLICK]** Show slide 9.
 
@@ -127,14 +128,14 @@ Spoken lines only, for reading: `docs/submission/video-read.txt`.
 
 > So normal customers keep being paid, and the breaker stops as little as possible.
 
-## 3:41 · Where it fits (slide 6)
+## 3:51 · Where it fits (slide 6)
 
 **[CLICK]** Show slide 6.
 
 > Signer hooks already exist.
 > Fail Closed is a prototype of the decision logic behind them.
 
-## 3:50 · Honest limits and next (slide 11)
+## 4:00 · Honest limits and next (slide 11)
 
 **[CLICK]** Show slide 11.
 
@@ -143,7 +144,7 @@ Spoken lines only, for reading: `docs/submission/video-read.txt`.
 > It stops that break-in from getting a signature.
 > Next: a real signer hook, and checking every signature against the exchange ledger.
 
-## 4:11 · Close (slide 1)
+## 4:21 · Close (slide 1)
 
 **[CLICK]** Show slide 1.
 
@@ -153,4 +154,4 @@ Spoken lines only, for reading: `docs/submission/video-read.txt`.
 
 ---
 
-Spoken words: 472 (counting the longer where-it-runs line). At 110 words per minute: 4:17 of speaking.
+Spoken words: 490 (counting the longer where-it-runs line). At 110 words per minute: 4:27 of speaking.

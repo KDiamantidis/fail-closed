@@ -65,6 +65,20 @@ The website uses only the neutral attack-class names. The real names stay in thi
    (fast path to sandbox). It can never allow, never downgrade, never turn a BLOCK into an ALLOW.
 4. **Fail closed.** If the sandbox breaks, times out or returns nothing, or a rule crashes: BLOCK.
 
+### How Fail Closed maps to Challenge 1
+
+The Guard is the control layer between the request and the signature. It **plans** the check
+(rules only, an AI check, or a full simulation), **dispatches** the transaction into an isolated
+sandbox, gets the **real executed output** (receipt, trace, state diff), **verifies** it with fixed
+rules, and the AI on Vultr Serverless Inference **explains** the result. The AI never decides.
+
+| Containment point | How | Where |
+|---|---|---|
+| Process isolation | one container per check (or reset to a clean snapshot), no network, read-only root, non-root user, all capabilities dropped, no privilege escalation, no port to talk to | `backend/sandbox_runner.py` |
+| Secret hygiene | empty environment, no keys or tokens inside, ever; the starting state comes from the Guard, not the request; the Guard's approval key stays outside the sandbox and the repo | `backend/sandbox_runner.py`, `backend/approval.py` |
+| Resource limits | 512 MB with no swap, 1 CPU, 128 processes, a hard timeout, temp files in memory only; a queue and a RAM guard decide how many sandboxes run at once | `backend/sandbox_runner.py`, `backend/sandbox_gate.py` |
+| Lifecycle | destroyed after the check, also on error or timeout (or rolled back to its snapshot); a dirty one is thrown away; the red team proves all four points | `backend/sandbox_runner.py`, `backend/redteam.py` |
+
 ### Two paths
 
 | Path | When | What happens |
