@@ -26,7 +26,9 @@ Routing:
 Every check records why it took its path. Any unexpected error -> BLOCK (and recorded).
 """
 
+import contextvars
 import logging
+import threading
 import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -38,7 +40,7 @@ from app.config import Settings
 from app.models import Decision, LLMAssessment, Path, SimulationResult, TxRequest, Verdict, WalletType
 from decode import Decoded, Kind, authority_of, decode
 from history import CheckRecord, History
-from llm import BUDGET_MESSAGE, CallSlots, LLMUnavailable
+from llm import BUDGET_MESSAGE, SHARE_MESSAGE, CallSlots, LLMUnavailable, current_visitor
 from policies.engine import RuleContext, block, decide, run_rules
 from policies.fmt import over_pct
 from policies.request_rules import REQUEST_RULES
@@ -97,6 +99,10 @@ class Guard:
         # At most LLM_CONCURRENCY model calls in flight, fast-path checks and explanations together
         # (a slot is held until the provider answers, even after our 2 s budget ran out): bursts
         # above that are what the provider answers with 429. The explainer owns the slots.
+        # Parallel requests must decide like requests one by one: the history rules (outflow R6,
+        # chains R7, assets R8, nonces R2) and a provisional history row run under a lock per wallet
+        # and per destination (striped: bounded memory). Never held during the AI check or the sandbox.
+        self._locks = [threading.Lock() for _ in range(256)]
         slots = getattr(explainer, "slots", None)
         self._ai_slots = slots if isinstance(slots, CallSlots) else CallSlots(settings.llm_concurrency)
 
@@ -134,7 +140,11 @@ class Guard:
             result.verdict = block(check_id, f"guard error: {type(e).__name__}: {e}")
         timings["total"] = self.perf() - t_start
         result.timings = timings
-        self._record(tx, result, now)
+        if not self._record(tx, result, now) and result.verdict.verdict is not Decision.BLOCK:
+            # fail closed: a check that is not in the history would be invisible to the outflow and
+            # multi-chain rules of the next request, so it is never approved
+            result.verdict = block(check_id, "could not record the check in the history (fail closed)")
+            self._record(tx, result, now)
         if self.breaker is not None:
             try:
                 result.breaker_actions = self.breaker.apply(tx, result.verdict, now, check_id)
@@ -142,7 +152,9 @@ class Guard:
                 log.exception("breaker failed")
                 result.breaker_actions = ["breaker error (see log)"]
         if result._explain_input is not None:
-            result.explanation = self._explain_pool.submit(self._explain_later, check_id, *result._explain_input)
+            # the visitor (for their AI share) travels with the background explanation
+            result.explanation = self._explain_pool.submit(contextvars.copy_context().run, self._explain_later,
+                                                           check_id, *result._explain_input)
         v = result.verdict
         self.emit(check_id, "verdict", {
             "verdict": v.verdict.value, "path": v.path.value if v.path else None, "reasons": v.reasons,
@@ -176,7 +188,16 @@ class Guard:
 
         ctx = RuleContext(tx=tx, path=Path.FAST, simulation=None, decoded=decoded, settings=s,
                           history=self.history, state=state, now=now)
-        req_findings = self._timed(timings, "request_rules", run_rules, REQUEST_RULES, ctx)
+        locks = [self._locks[i] for i in sorted({hash(("wallet", tx.from_)) % len(self._locks),
+                                                 hash(("destination", decoded.destination)) % len(self._locks)})]
+        for lock in locks:
+            lock.acquire()
+        try:
+            req_findings = self._timed(timings, "request_rules", run_rules, REQUEST_RULES, ctx)
+            self._reserve(tx, decoded, check_id, now)  # raises if it cannot be written: BLOCK
+        finally:
+            for lock in reversed(locks):
+                lock.release()
 
         self.emit(check_id, "request_rules", {"findings": [_finding(f) for f in req_findings]})
         path, reasons, llm = self._route(tx, decoded, req_findings, timings, state, now, check_id)
@@ -270,7 +291,7 @@ class Guard:
             timings["llm"] = time.monotonic() - t0
             return Path.SLOW, reasons + [unavailable_reason(
                 f"busy, {s.llm_concurrency} AI calls already running")], None
-        future = self._escalate_pool.submit(self._escalation_check_in_slot, tx)
+        future = self._escalate_pool.submit(contextvars.copy_context().run, self._escalation_check_in_slot, tx)
         try:
             llm, failure = future.result(timeout=max(0.0, limit - (time.monotonic() - t0)))
         except FutureTimeout:
@@ -343,11 +364,14 @@ class Guard:
 
     def _budget_reached(self) -> bool:
         budget = getattr(self.explainer, "budget", None)
-        return bool(budget is not None and budget.reached())
+        return bool(budget is not None and (budget.reached() or budget.share_reached(current_visitor.get())))
 
     def _unavailable_reason(self) -> str:
-        if self._budget_reached():
+        budget = getattr(self.explainer, "budget", None)
+        if budget is not None and budget.reached():
             return BUDGET_MESSAGE
+        if budget is not None and budget.share_reached(current_visitor.get()):
+            return SHARE_MESSAGE
         return "LLM unavailable: no explanation; the verdict is the same"
 
     def _explain(self, tx: TxRequest, sim: SimulationResult | None) -> LLMAssessment | None:
@@ -358,7 +382,17 @@ class Guard:
             log.warning("explainer raised: %s", e)
             return None
 
-    def _record(self, tx: TxRequest, r: CheckResult, now: float) -> None:
+    def _reserve(self, tx: TxRequest, d: Decoded, check_id: str, now: float) -> None:
+        """A provisional (PENDING) row, so a parallel request counts this one; replaced at the end."""
+        self.history.record_check(CheckRecord(
+            id=check_id, ts=now, wallet=tx.from_, chain_id=tx.chain_id, wallet_type=tx.wallet_type.value,
+            kind=d.kind.value, destination=d.destination, asset=d.asset, amount=d.amount, path="none",
+            path_reasons=["provisional: still being checked"], verdict="PENDING", findings=[], timings={},
+            llm=None, request=tx.model_dump(mode="json", by_alias=True), release_at=None,
+            auth_nonces=[(authority_of(a, tx), a.chain_id, a.nonce) for a in tx.authorization_list or []]))
+
+    def _record(self, tx: TxRequest, r: CheckResult, now: float) -> bool:
+        """Write the final check. False if it could not be written (the caller then blocks)."""
         d, v = r.decoded, r.verdict
         try:
             self.history.record_check(CheckRecord(
@@ -380,6 +414,8 @@ class Guard:
                     v.reasons, release_at=v.release_at)
         except Exception:  # noqa: BLE001
             log.exception("could not record check %s", r.check_id)
+            return False
+        return True
 
 
 def _finding(f) -> dict:

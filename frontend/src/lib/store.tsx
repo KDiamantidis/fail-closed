@@ -129,8 +129,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const load = () => {
-      getJSON<Status>("/status").then(setStatus).catch(() => setStatus(null));
-      getJSON("/breaker").then(setMainBreaker).catch(() => setMainBreaker(null));
+      getJSON<Status>("/status").then((st) => {
+        setStatus(st);
+        // public demo: the Guard's own breaker is admin-only; visitors see their own replays
+        if (st.public_demo) setMainBreaker(null);
+        else getJSON("/breaker").then(setMainBreaker).catch(() => setMainBreaker(null));
+      }).catch(() => setStatus(null));
     };
     load();
     getJSON<ScenarioInfo[]>("/scenarios").then(setScenarios).catch(() => setScenarios([]));

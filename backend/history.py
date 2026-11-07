@@ -16,7 +16,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-MAY_MOVE_FUNDS = ("ALLOW", "DELAY", "NEEDS_HUMAN")
+# PENDING: a check that has passed its request rules and is still running (sandbox, AI). It is
+# counted like money that may move, so a parallel request sees it (the per-wallet lock in the Guard).
+MAY_MOVE_FUNDS = ("ALLOW", "DELAY", "NEEDS_HUMAN", "PENDING")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS checks (
@@ -157,7 +159,10 @@ class History:
             verdict="ALLOW", findings=[], timings={}, llm=None, request={}))
 
     def record_check(self, r: CheckRecord) -> None:
+        """Insert a check, or replace its provisional (PENDING) row with the final one."""
         with self.lock, self.conn:
+            self.conn.execute("DELETE FROM checks WHERE id = ?", (r.id,))
+            self.conn.execute("DELETE FROM auth_nonces WHERE check_id = ?", (r.id,))
             self.conn.execute(
                 "INSERT INTO checks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (r.id, r.ts, r.wallet, r.chain_id, r.wallet_type, r.kind, r.destination, r.asset,

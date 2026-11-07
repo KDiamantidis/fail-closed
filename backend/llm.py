@@ -10,12 +10,14 @@ With an API key set, a failure NEVER falls back to the mock. The mock is used on
 when there is no key (LLM_MODE=auto) or when LLM_MODE=mock, and is always marked.
 """
 
+import contextvars
+import hashlib
 import json
 import logging
 import re
 import threading
 import time
-from collections import Counter
+from collections import Counter, OrderedDict
 from contextlib import contextmanager
 from fractions import Fraction
 from pathlib import Path
@@ -137,6 +139,12 @@ class CallSlots:
 
 BUDGET_KIND = "demo budget reached"
 BUDGET_MESSAGE = "Demo budget reached: AI explanations paused until tomorrow"
+SHARE_KIND = "visitor budget share reached"
+SHARE_MESSAGE = "Your share of today's AI budget is used: AI explanations paused for you until tomorrow"
+
+# Who the current model call is for (public demo: the visitor key; None = the operator / tests).
+# Set by the API for a replay; copied into the background threads that write explanations.
+current_visitor: contextvars.ContextVar[str | None] = contextvars.ContextVar("current_visitor", default=None)
 
 
 def call_cost(model: str, usage: Any) -> Fraction:
@@ -154,8 +162,10 @@ class DailyBudget:
     (LLM_BUDGET_FILE) so a restart does not reset it; in memory if no file is set. Up to
     LLM_CONCURRENCY calls already in flight may finish after the cap is reached."""
 
-    def __init__(self, limit_usd: float, path: str = "", today=None):
+    def __init__(self, limit_usd: float, path: str = "", today=None, visitor_share_usd: float = 0.0):
         self.limit = Fraction(str(limit_usd))
+        self.share = Fraction(str(visitor_share_usd))  # one visitor's part of the day (0 = no share limit)
+        self._by_visitor: dict[str, Fraction] = {}
         self.path = Path(path) if path else None
         self.today = today or (lambda: time.strftime("%Y-%m-%d", time.gmtime()))
         self._lock = threading.Lock()
@@ -171,6 +181,15 @@ class DailyBudget:
         day = self.today()
         if day != self._day:
             self._day, self._spent = day, Fraction(0)
+            self._by_visitor = {}
+
+    def share_reached(self, visitor: str | None) -> bool:
+        """This visitor has used their share of today's budget (so one visitor cannot use it all)."""
+        if visitor is None or self.share <= 0:
+            return False
+        with self._lock:
+            self._roll()
+            return self._by_visitor.get(visitor, Fraction(0)) >= self.share
 
     def reached(self) -> bool:
         if self.limit <= 0:
@@ -179,10 +198,14 @@ class DailyBudget:
             self._roll()
             return self._spent >= self.limit
 
-    def add(self, usd: Fraction) -> None:
+    def add(self, usd: Fraction, visitor: str | None = None) -> None:
         with self._lock:
             self._roll()
             self._spent += usd
+            if visitor is not None:
+                self._by_visitor[visitor] = self._by_visitor.get(visitor, Fraction(0)) + usd
+                if len(self._by_visitor) > 50_000:  # bounded memory
+                    self._by_visitor.pop(next(iter(self._by_visitor)))
             if self.path:
                 try:
                     self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -413,7 +436,13 @@ class LLMExplainer:
         self._client = client
         self.usage = LLMUsage()
         self.slots = CallSlots(settings.llm_concurrency)  # shared by fast-path checks and explanations
-        self.budget = DailyBudget(settings.llm_daily_budget_usd, settings.llm_budget_file)
+        self.budget = DailyBudget(settings.llm_daily_budget_usd, settings.llm_budget_file,
+                                  visitor_share_usd=getattr(settings, "llm_visitor_share_usd", 0.0))
+        # Explanations by the exact prompt (request + sandbox result): a replay is deterministic, so
+        # the same step is explained (and paid for) once. Bounded; process memory only.
+        self._explained: "OrderedDict[str, LLMAssessment]" = OrderedDict()
+        self._explained_lock = threading.Lock()
+        self.cache_hits = 0
 
     @property
     def model_label(self) -> str:
@@ -458,6 +487,23 @@ class LLMExplainer:
         timeout, then the fast model if that fails. Never on the 2 s fast-path budget.
         Each call waits in line for a shared slot; fast-path checks go first."""
         s = self.settings
+        key = hashlib.sha256((describe(tx, sim) + "|" + s.vultr_explain_model + "|" + s.vultr_model).encode()).hexdigest()
+        with self._explained_lock:
+            hit = self._explained.get(key)
+            if hit is not None:
+                self._explained.move_to_end(key)
+                self.cache_hits += 1
+                return hit
+        out = self._explain_uncached(tx, sim)
+        if out is not None and not out.mock:
+            with self._explained_lock:
+                self._explained[key] = out
+                while len(self._explained) > 512:
+                    self._explained.popitem(last=False)
+        return out
+
+    def _explain_uncached(self, tx: TxRequest, sim: SimulationResult | None) -> LLMAssessment | None:
+        s = self.settings
         big = s.vultr_explain_model.strip()
         if self.mode == "live" and big and big != s.vultr_model:
             try:
@@ -501,10 +547,13 @@ class LLMExplainer:
             if self.budget.reached():  # never the mock instead: the caller treats this as unavailable
                 kind = BUDGET_KIND
                 break
+            if self.budget.share_reached(current_visitor.get()):
+                kind = SHARE_KIND
+                break
             try:
                 resp = self.client.chat.completions.create(**kwargs)
                 self.usage.add(model, getattr(resp, "usage", None))
-                self.budget.add(call_cost(model, getattr(resp, "usage", None)))
+                self.budget.add(call_cost(model, getattr(resp, "usage", None)), current_visitor.get())
                 out = parse_assessment(resp.choices[0].message.content)
                 self.usage.attempt(None, model)
                 return out.model_copy(update={"model": model})

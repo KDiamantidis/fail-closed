@@ -34,7 +34,7 @@ from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
@@ -49,7 +49,7 @@ from reports import blast_radius_data
 from loadtest import run_config
 from redteam import RedTeam
 from holds import HoldError, HoldManager
-from llm import LLMExplainer
+from llm import LLMExplainer, current_visitor
 from sandbox_gate import GuardBusy, SandboxGate, low_memory_check
 from sandbox_runner import SandboxRunner
 from scenario import discover, load, merged_policy, merged_state
@@ -84,8 +84,18 @@ class ResetRequest(BaseModel):
 
 
 DEMO_RUN_TTL_SECONDS = 30 * 60
-DEMO_RUN_MAX = 50
+DEMO_RUN_MAX = 200  # all visitors together; each visitor keeps at most DEMO_RUNS_PER_VISITOR
 TRUSTED_PROXIES = ("127.0.0.1", "::1")  # Caddy / the tunnel on the same host
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "[::1]")  # the operator on this machine (no proxy header)
+# The same headers as deploy/Caddyfile, sent by the app itself in public mode (Plan B has no Caddy).
+SECURITY_HEADERS = {
+    "Content-Security-Policy": ("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+                                "font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; "
+                                "base-uri 'none'; form-action 'self'"),
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
 
 
 class RateLimiter:
@@ -111,7 +121,27 @@ class RateLimiter:
                                     detail=f"Too many {words} from your address: at most {limit} per "
                                            f"{_window_words(window)}. Please try again in {wait} s.")
             q.append(now)
-            if len(self._hits) > 10_000:  # bounded memory: forget idle addresses
+            self._prune(now)
+
+    def count(self, what: str, ip: str, window: float) -> int:
+        """Events in the window (without adding one)."""
+        now = self.clock()
+        with self._lock:
+            q = self._hits.get((what, ip))
+            if not q:
+                return 0
+            while q and q[0] <= now - window:
+                q.popleft()
+            return len(q)
+
+    def add(self, what: str, ip: str) -> None:
+        now = self.clock()
+        with self._lock:
+            self._hits.setdefault((what, ip), deque()).append(now)
+            self._prune(now)
+
+    def _prune(self, now: float) -> None:
+        if len(self._hits) > 10_000:  # bounded memory: forget idle addresses
                 for key in [k for k, v in self._hits.items() if not v or v[-1] <= now - 3600]:
                     del self._hits[key]
 
@@ -138,9 +168,27 @@ def client_ip(request: Request, trusted_proxy: str = "caddy") -> str:
     else:
         value = ""
     try:
-        return str(ipaddress.ip_address(value)) if value else peer
+        ipaddress.ip_address(value)  # only a real IP address counts; anything else: the socket peer
     except ValueError:
-        return peer
+        return visitor_key(peer)
+    return visitor_key(value)
+
+
+def visitor_key(address: str) -> str:
+    """One visitor for the limits: an IPv4 address, or an IPv6 /64 (one home or phone network
+    usually gets a whole /64, so per-address IPv6 limits are easy to bypass). ::ffff:a.b.c.d is
+    the IPv4 address a.b.c.d."""
+    try:
+        ip = ipaddress.ip_address(address.strip())
+    except ValueError:
+        return address
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            return str(ip.ipv4_mapped)
+        if ip.is_loopback:
+            return str(ip)
+        return str(ipaddress.IPv6Network(f"{ip}/64", strict=False))
+    return str(ip)
 RUN_ID = re.compile(r"^[a-z0-9]{8,32}$")
 FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
 
@@ -192,7 +240,9 @@ class Services:
         # Demo runs stay alive for a while so a visitor can approve/reject NEEDS_HUMAN items in
         # THEIR OWN isolated run (never the main state). Bounded: oldest runs are dropped.
         self.demo_runs: "OrderedDict[str, tuple[Services, float]]" = OrderedDict()
+        self.run_owner: dict[str, str] = {}  # run id (replay or simulation) -> visitor key
         self.demo_lock = threading.Lock()
+        self.streams: dict[str, int] = {}  # open /stream connections per visitor
 
     def demo_ttl(self) -> float:
         """Public demo: a visitor's run is dropped after N idle minutes (auto-reset)."""
@@ -200,14 +250,30 @@ class Services:
             return self.settings.demo_idle_reset_minutes * 60
         return DEMO_RUN_TTL_SECONDS
 
-    def remember_demo(self, run_id: str, iso: "Services") -> None:
+    def remember_demo(self, run_id: str, iso: "Services", owner: str = "") -> None:
+        """Keep a visitor's run. At most DEMO_RUNS_PER_VISITOR per visitor: a visitor who runs more
+        loses THEIR oldest run, never someone else's."""
         with self.demo_lock:
             now = time.time()
             for rid in [r for r, (_, exp) in self.demo_runs.items() if exp < now]:
                 del self.demo_runs[rid]
+                self.run_owner.pop(rid, None)
             self.demo_runs[run_id] = (iso, now + self.demo_ttl())
+            self.run_owner[run_id] = owner
+            mine = [r for r in self.demo_runs if self.run_owner.get(r) == owner]
+            for rid in mine[:max(0, len(mine) - max(1, self.settings.demo_runs_per_visitor))]:
+                del self.demo_runs[rid]
+                self.run_owner.pop(rid, None)
             while len(self.demo_runs) > DEMO_RUN_MAX:
-                self.demo_runs.popitem(last=False)
+                rid, _ = self.demo_runs.popitem(last=False)
+                self.run_owner.pop(rid, None)
+
+    def owns(self, run_id: str, owner: str) -> bool:
+        """Public demo: only the visitor who started a run may see or change it."""
+        if not self.settings.public_demo:
+            return True
+        with self.demo_lock:
+            return self.run_owner.get(run_id) == owner
 
     def demo(self, run_id: str) -> "Services":
         with self.demo_lock:
@@ -220,10 +286,18 @@ class Services:
             self.demo_runs[run_id] = (entry[0], now + self.demo_ttl())  # activity keeps it alive
         return entry[0]
 
-    def forget_demos(self, run_ids: list[str]) -> int:
-        """Reset demo: drop these runs with their breaker, queue and history (level 0 again)."""
+    def forget_demos(self, run_ids: list[str], owner: str | None = None) -> int:
+        """Reset demo: drop these runs with their breaker, queue and history (level 0 again).
+        With an owner (public demo): only that visitor's runs."""
+        n = 0
         with self.demo_lock:
-            return sum(1 for rid in run_ids if self.demo_runs.pop(rid, None) is not None)
+            for rid in run_ids:
+                if owner is not None and self.settings.public_demo and self.run_owner.get(rid) != owner:
+                    continue
+                if self.demo_runs.pop(rid, None) is not None:
+                    self.run_owner.pop(rid, None)
+                    n += 1
+        return n
 
     def make_redteam(self, probe) -> RedTeam:
         return RedTeam(self.settings, health_probe=probe, gate=self.guard.gate)
@@ -307,18 +381,65 @@ def create_app(services: Services | None = None) -> FastAPI:
             if getattr(svc.guard.runner, "pool", None) is not None:
                 svc.guard.runner.pool.shutdown()
 
+    public = svc.settings.public_demo
+    # public demo: no API docs (a map of the admin routes), no CORS origins
     app = FastAPI(title="Fail Closed", version="0.3.0", lifespan=lifespan,
-                  description="Signing Guard: no approval, no signature.")
+                  description="Signing Guard: no approval, no signature.",
+                  docs_url=None if public else "/docs", redoc_url=None if public else "/redoc",
+                  openapi_url=None if public else "/openapi.json")
     app.state.services = svc
-    app.add_middleware(CORSMiddleware, allow_origins=svc.settings.cors_origins, allow_methods=["GET", "POST"],
-                       allow_headers=["Content-Type", "X-Admin-Token"], allow_credentials=False)
+    if not public:
+        app.add_middleware(CORSMiddleware, allow_origins=svc.settings.cors_origins, allow_methods=["GET", "POST"],
+                           allow_headers=["Content-Type", "X-Admin-Token"], allow_credentials=False)
 
     limiter = RateLimiter()
     app.state.limiter = limiter
 
-    def limit(request: Request, what: str, n: int, window: float, words: str) -> None:
+    def visitor(request: Request) -> str:
+        return client_ip(request, svc.settings.trusted_proxy)
+
+    def limit(request: Request, what: str, n: int, window: float, words: str, global_n: int = 0) -> None:
         if svc.settings.public_demo:
-            limiter.hit(what, client_ip(request, svc.settings.trusted_proxy), n, window, words)
+            limiter.hit(what, visitor(request), n, window, words)
+            if global_n:  # all visitors together (an attacker with many addresses)
+                limiter.hit(what, "*all visitors*", global_n, window, words + " from all visitors")
+
+    def plain(status: int, detail: str, headers: dict | None = None) -> JSONResponse:
+        return JSONResponse({"detail": detail}, status_code=status, headers=headers or {})
+
+    @app.middleware("http")
+    async def guard_the_door(request: Request, call_next):
+        """Every request (public demo): body size, a visitor address behind cloudflared, a general
+        per-visitor cap, wrong admin tokens; and the security headers on every answer."""
+        st = svc.settings
+        length = request.headers.get("content-length")
+        if length is not None and (not length.isdigit() or int(length) > st.max_body_bytes):
+            return plain(413, f"Request body too large (at most {st.max_body_bytes // 1024} KB).")
+        if request.headers.get("transfer-encoding", "").lower() == "chunked":
+            return plain(411, "Send a Content-Length (chunked request bodies are not accepted).")
+        if st.public_demo:
+            peer = request.client.host if request.client else ""
+            host = request.headers.get("host", "").rsplit(":", 1)[0] if not request.headers.get("host", "").startswith("[") \
+                else request.headers.get("host", "").split("]")[0] + "]"
+            if (st.trusted_proxy == "cloudflared" and peer in TRUSTED_PROXIES and host not in LOCAL_HOSTS
+                    and not request.headers.get("cf-connecting-ip")):
+                return plain(400, "Missing visitor address (CF-Connecting-IP): requests must come through the tunnel.")
+            key = visitor(request)
+            try:
+                limiter.hit("any request", key, st.rate_requests_per_minute, 60, "requests")
+            except HTTPException as e:
+                return plain(e.status_code, e.detail, e.headers)
+            token = request.headers.get("x-admin-token")
+            if token is not None and limiter.count("admin failure", key, 600) >= st.admin_failures_per_10_minutes:
+                return plain(429, "Too many wrong admin tokens from your address. Please try again in 10 minutes.",
+                             {"Retry-After": "600"})
+        response = await call_next(request)
+        if st.public_demo:
+            if request.headers.get("x-admin-token") is not None and response.status_code in (401, 403):
+                limiter.add("admin failure", visitor(request))
+            for k, v in SECURITY_HEADERS.items():
+                response.headers[k] = v
+        return response
 
     def admin_in_public_demo(token: str | None) -> None:
         """Public demo: the raw API on the Guard's own state is for the operator only."""
@@ -411,11 +532,13 @@ def create_app(services: Services | None = None) -> FastAPI:
             raise HTTPException(status_code=503, detail=f"Guard busy: {e}. Nothing was approved or signed.")
 
     @app.get("/history")
-    def history(limit: int = Query(50, ge=1, le=500)) -> list[dict]:
+    def history(limit: int = Query(50, ge=1, le=500), x_admin_token: str | None = Header(default=None)) -> list[dict]:
+        admin_in_public_demo(x_admin_token)
         return svc.history.recent(limit)
 
     @app.get("/breaker")
-    def breaker() -> dict:
+    def breaker(x_admin_token: str | None = Header(default=None)) -> dict:
+        admin_in_public_demo(x_admin_token)
         return {**svc.breaker.state(), "signals": svc.breaker.signals(), "events": svc.history.events()[-50:]}
 
     def require_admin(token: str | None) -> None:
@@ -426,7 +549,8 @@ def create_app(services: Services | None = None) -> FastAPI:
             raise HTTPException(status_code=403, detail="invalid admin token (or admin actions disabled)")
 
     @app.get("/pending")
-    def pending() -> list[dict]:
+    def pending(x_admin_token: str | None = Header(default=None)) -> list[dict]:
+        admin_in_public_demo(x_admin_token)
         """Held requests waiting: NEEDS_HUMAN (for a human) and DELAY (for the worker)."""
         return svc.history.held("pending")
 
@@ -498,7 +622,8 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.post("/loadtest/run")
     async def loadtest_run(request: Request, normal: int = Query(50, ge=10, le=100), seed: int = Query(7),
                            run_id: str | None = None):
-        limit(request, "simulation", svc.settings.rate_simulations_per_10_minutes, 600, "simulations")
+        limit(request, "simulation", svc.settings.rate_simulations_per_10_minutes, 600, "simulations",
+              svc.settings.rate_global_simulations_per_10_minutes)
         """The small load demo for the UI: N normal + 1 hidden attack, on its OWN isolated state
         (in-memory history and breaker), through the host's sandbox gate. SSE: one event per
         request, then the summary. Mock LLM numbers are labelled as such."""
@@ -507,6 +632,10 @@ def create_app(services: Services | None = None) -> FastAPI:
         if not svc.loadtest_lock.acquire(blocking=False):
             raise HTTPException(status_code=409, detail="a load demo is already running")
         run_id = run_id or "loadtest-" + uuid.uuid4().hex[:8]  # client-chosen: it can poll /events?run_id
+        with svc.demo_lock:
+            svc.run_owner[run_id] = visitor(request)  # only this visitor may follow it
+            while len(svc.run_owner) > 5 * DEMO_RUN_MAX:  # bounded
+                svc.run_owner.pop(next(iter(svc.run_owner)))
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
         cfg = {"sandbox_mode": svc.settings.sandbox_mode,
@@ -579,16 +708,37 @@ def create_app(services: Services | None = None) -> FastAPI:
         return {"reset": done, "breaker": st, "level": level_of(st)}
 
     @app.get("/events")
-    def events(request: Request, after: int = 0, check_id: str | None = None, run_id: str | None = None) -> list[dict]:
-        """The same events as /stream, to poll when Server-Sent Events do not get through."""
+    def events(request: Request, after: int = 0, check_id: str | None = None, run_id: str | None = None,
+               x_admin_token: str | None = Header(default=None)) -> list[dict]:
+        """The same events as /stream, to poll when Server-Sent Events do not get through.
+        Public demo: only your own run (run_id required); the Guard's own events need the admin token."""
         limit(request, "poll", svc.settings.rate_polls_per_minute, 60, "update requests")
-        return svc.bus.since(after, check_id, run_id)
+        run_id = own_run_or_admin(request, run_id, x_admin_token)
+        return svc.bus.since(after, check_id, run_id)[: svc.settings.events_max_reply]
+
+    def own_run_or_admin(request: Request, run_id: str | None, token: str | None) -> str | None:
+        if not svc.settings.public_demo:
+            return run_id
+        if token is not None:  # the operator may read everything
+            require_admin(token)
+            return run_id
+        if not run_id or run_id == "main" or not svc.owns(run_id, visitor(request)):
+            raise HTTPException(status_code=404, detail="Unknown run. Run a replay first.")
+        return run_id
 
     @app.get("/stream")
-    async def stream(limit: int | None = Query(None, ge=1), replay: int = Query(0, ge=0, le=1000),
-                     run_id: str | None = None):
+    async def stream(request: Request, limit: int | None = Query(None, ge=1), replay: int = Query(0, ge=0, le=1000),
+                     run_id: str | None = None, x_admin_token: str | None = Header(default=None)):
         """SSE. `replay` sends the last N buffered events first; `limit` closes after N events;
         `run_id` keeps only one demo run (or "main")."""
+        run_id = own_run_or_admin(request, run_id, x_admin_token)
+        key = visitor(request)
+        with svc.demo_lock:
+            if svc.settings.public_demo and svc.streams.get(key, 0) >= svc.settings.stream_max_per_visitor:
+                raise HTTPException(status_code=429, detail=(
+                    f"Too many open live-update connections from your address: at most "
+                    f"{svc.settings.stream_max_per_visitor}. Close a tab, or the page polls instead."))
+            svc.streams[key] = svc.streams.get(key, 0) + 1
         queue = svc.bus.subscribe()
         backlog = [e for e in list(svc.bus.recent) if run_id is None or e["run_id"] == run_id]
         backlog = backlog[-replay:] if replay else []
@@ -616,6 +766,10 @@ def create_app(services: Services | None = None) -> FastAPI:
                         return
             finally:
                 svc.bus.unsubscribe(queue)
+                with svc.demo_lock:
+                    svc.streams[key] = svc.streams.get(key, 1) - 1
+                    if svc.streams[key] <= 0:
+                        svc.streams.pop(key, None)
 
         return StreamingResponse(gen(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -637,7 +791,8 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.post("/scenarios/{name}/run")
     def run_scenario(request: Request, name: str, run_id: str | None = None) -> dict:
         """`run_id` may be chosen by the client (so it can subscribe to /stream?run_id first)."""
-        limit(request, "replay", svc.settings.rate_replays_per_minute, 60, "replays")
+        limit(request, "replay", svc.settings.rate_replays_per_minute, 60, "replays",
+              svc.settings.rate_global_replays_per_minute)
         files = _scenario_files()
         if name not in files:  # only known names: no paths from the client
             raise HTTPException(status_code=404, detail="unknown scenario")
@@ -648,8 +803,9 @@ def create_app(services: Services | None = None) -> FastAPI:
             if run_id in svc.demo_runs:
                 raise HTTPException(status_code=409, detail="run_id already used")
         sc = load(files[name])
+        current_visitor.set(visitor(request) if svc.settings.public_demo else None)  # their AI budget share
         iso = svc.isolated(run_id)  # fresh state per run: one visitor never changes another's result
-        svc.remember_demo(run_id, iso)
+        svc.remember_demo(run_id, iso, visitor(request))
         iso.publish("-", "run_started", {"scenario": name, "requests": len(sc.requests)})
         results = []
         try:
@@ -684,8 +840,14 @@ def create_app(services: Services | None = None) -> FastAPI:
     # ---- the visitor's own demo run: human approval without touching the main state ------
 
     @app.get("/demo/{run_id}/pending")
-    def demo_pending(run_id: str) -> list[dict]:
+    def demo_pending(request: Request, run_id: str) -> list[dict]:
+        own_demo(request, run_id)
         return svc.demo(run_id).history.held("pending", "needs_human")
+
+    def own_demo(request: Request, run_id: str) -> None:
+        """Public demo: a visitor acts only on their own runs (same answer as an unknown run)."""
+        if not svc.owns(run_id, visitor(request)):
+            raise HTTPException(status_code=404, detail="This demo was reset (no activity for a while, or Reset demo). Run the replay again.")
 
     @app.post("/demo/{run_id}/breaker/reset-all")
     def demo_reset_all(run_id: str, x_admin_token: str | None = Header(default=None)) -> dict:
@@ -704,11 +866,12 @@ def create_app(services: Services | None = None) -> FastAPI:
         level 0. Run ids are random, so nobody can reset another visitor's demo by guessing.
         The Guard's own state is not touched (lifting a real level needs the admin token)."""
         limit(request, "demo_action", svc.settings.rate_demo_actions_per_minute, 60, "demo actions")
-        return {"reset": svc.forget_demos(body.run_ids), "level": 0}
+        return {"reset": svc.forget_demos(body.run_ids, owner=visitor(request)), "level": 0}
 
     @app.post("/demo/{run_id}/pending/{hold_id}/{decision}")
     def demo_decide(request: Request, run_id: str, hold_id: str, decision: str) -> dict:
         limit(request, "demo_action", svc.settings.rate_demo_actions_per_minute, 60, "demo actions")
+        own_demo(request, run_id)
         if decision not in ("approve", "reject"):
             raise HTTPException(status_code=404, detail="unknown decision")
         iso = svc.demo(run_id)

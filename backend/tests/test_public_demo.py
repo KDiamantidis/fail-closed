@@ -226,9 +226,10 @@ def test_cf_header_is_ignored_when_the_setting_is_off(tmp_path, monkeypatch):
 
 
 def test_polling_has_its_own_limit_and_is_not_a_replay(tmp_path):
-    c, _ = public(tmp_path, rate_polls_per_minute=3, rate_replays_per_minute=1)
+    c, _ = public(tmp_path, rate_polls_per_minute=3, rate_replays_per_minute=2)
+    assert c.post("/scenarios/a_customer_small_withdrawal/run?run_id=pollrun0001").status_code == 200
     for _ in range(3):
-        assert c.get("/events?after=0").status_code == 200
-    r = c.get("/events?after=0")
+        assert c.get("/events?after=0&run_id=pollrun0001").status_code == 200
+    r = c.get("/events?after=0&run_id=pollrun0001")
     assert r.status_code == 429 and r.json()["detail"].startswith("Too many update requests")
     assert c.post("/scenarios/a_customer_small_withdrawal/run").status_code == 200  # polls did not use it up

@@ -71,6 +71,16 @@ class Settings(BaseSettings):
     rate_simulations_per_10_minutes: int = 2
     rate_demo_actions_per_minute: int = 30
     rate_polls_per_minute: int = 300  # GET /events polling (never counted as a replay or demo action)
+    # Security audit fixes (public demo). Per visitor = per IPv4 address or per IPv6 /64.
+    rate_requests_per_minute: int = 600  # every request, per visitor
+    rate_global_replays_per_minute: int = 60  # all visitors together
+    rate_global_simulations_per_10_minutes: int = 6
+    admin_failures_per_10_minutes: int = 10  # wrong admin tokens per visitor, then 429
+    stream_max_per_visitor: int = 3  # open /stream connections per visitor
+    events_max_reply: int = 500  # events in one /events reply (the client continues from the last seq)
+    demo_runs_per_visitor: int = 5  # stored demo runs per visitor; the oldest of THAT visitor is dropped
+    max_body_bytes: int = 64 * 1024  # larger request bodies: 413
+    llm_visitor_share_usd: float = 0.10  # one visitor's share of the daily AI budget (0 = no share limit)
     # Live updates in the web UI: "sse" (Server-Sent Events first, polling only if the stream
     # fails) or "poll" (always poll GET /events; e.g. behind a Cloudflare quick tunnel, which
     # does not support SSE).
