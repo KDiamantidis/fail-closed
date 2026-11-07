@@ -438,8 +438,8 @@ class LLMExplainer:
         self.slots = CallSlots(settings.llm_concurrency)  # shared by fast-path checks and explanations
         self.budget = DailyBudget(settings.llm_daily_budget_usd, settings.llm_budget_file,
                                   visitor_share_usd=getattr(settings, "llm_visitor_share_usd", 0.0))
-        # Explanations by the exact prompt (request + sandbox result): a replay is deterministic, so
-        # the same step is explained (and paid for) once. Bounded; process memory only.
+        # Model answers by the exact prompt (request + sandbox result) and model: a replay is
+        # deterministic, so each step is paid for once (AI check and explanation). Bounded; memory only.
         self._explained: "OrderedDict[str, LLMAssessment]" = OrderedDict()
         self._explained_lock = threading.Lock()
         self.cache_hits = 0
@@ -487,23 +487,6 @@ class LLMExplainer:
         timeout, then the fast model if that fails. Never on the 2 s fast-path budget.
         Each call waits in line for a shared slot; fast-path checks go first."""
         s = self.settings
-        key = hashlib.sha256((describe(tx, sim) + "|" + s.vultr_explain_model + "|" + s.vultr_model).encode()).hexdigest()
-        with self._explained_lock:
-            hit = self._explained.get(key)
-            if hit is not None:
-                self._explained.move_to_end(key)
-                self.cache_hits += 1
-                return hit
-        out = self._explain_uncached(tx, sim)
-        if out is not None and not out.mock:
-            with self._explained_lock:
-                self._explained[key] = out
-                while len(self._explained) > 512:
-                    self._explained.popitem(last=False)
-        return out
-
-    def _explain_uncached(self, tx: TxRequest, sim: SimulationResult | None) -> LLMAssessment | None:
-        s = self.settings
         big = s.vultr_explain_model.strip()
         if self.mode == "live" and big and big != s.vultr_model:
             try:
@@ -533,6 +516,14 @@ class LLMExplainer:
         ]
         s = self.settings
         model = model or s.vultr_model
+        key = hashlib.sha256((model + "|" + messages[1]["content"]).encode()).hexdigest()
+        paused = self.budget.reached() or self.budget.share_reached(current_visitor.get())
+        with self._explained_lock:  # (when paused, the loop below raises: the same answer as always)
+            hit = None if paused else self._explained.get(key)
+            if hit is not None:
+                self._explained.move_to_end(key)
+                self.cache_hits += 1
+                return hit
         kwargs: dict[str, Any] = {"model": model, "messages": messages, "temperature": 0,
                                   "max_tokens": s.llm_max_tokens}
         if timeout is not None:
@@ -554,9 +545,13 @@ class LLMExplainer:
                 resp = self.client.chat.completions.create(**kwargs)
                 self.usage.add(model, getattr(resp, "usage", None))
                 self.budget.add(call_cost(model, getattr(resp, "usage", None)), current_visitor.get())
-                out = parse_assessment(resp.choices[0].message.content)
+                out = parse_assessment(resp.choices[0].message.content).model_copy(update={"model": model})
                 self.usage.attempt(None, model)
-                return out.model_copy(update={"model": model})
+                with self._explained_lock:
+                    self._explained[key] = out
+                    while len(self._explained) > 512:
+                        self._explained.popitem(last=False)
+                return out
             except Exception as e:  # noqa: BLE001 - every failure is handled the same way
                 kind = failure_kind(e)
                 self.usage.attempt(kind, model)

@@ -258,12 +258,43 @@ rules still decide.
 - **Visitors** run replays, the simulation and the review-queue demo, and read policies and
   containment. "Reset demo" puts their own demo back to level 0. It also resets on its own after
   10 minutes without activity.
-- **Admin token only:** raw `/check` and `/withdraw`, lifting a real breaker level, the Guard's own queue.
-- **Per-IP limits:** 10 replays a minute and 2 simulations per 10 minutes, with a plain message when hit.
-- **Daily model budget:** $1. When reached: "Demo budget reached: AI explanations paused until
-  tomorrow". Decisions keep working; the AI is never replaced by the mock.
+- **Admin token only:** raw `/check` and `/withdraw`, lifting a real breaker level, the Guard's own
+  history, queue, breaker and events. After 10 wrong tokens from one visitor: 10 minutes of 429.
+- **Own runs only:** a visitor sees and acts only on the replays they started (live updates, review
+  queue, Reset demo). Another visitor's run answers like an unknown one.
+- **Per-visitor limits** (a visitor = one IPv4 address or one IPv6 /64): 10 replays a minute,
+  2 simulations per 10 minutes, 600 requests a minute, 3 open live-update connections, 5 stored
+  demo runs (a visitor who runs more loses their own oldest run). Global caps for all visitors
+  together: 60 replays a minute, 6 simulations per 10 minutes. Always a plain message when hit.
+- **Daily model budget:** $1, and one visitor may use at most $0.10 of it. Each replay step is paid
+  for once: the same request with the same sandbox result reuses the earlier AI answer. When the
+  budget is reached: "Demo budget reached: AI explanations paused until tomorrow". Decisions keep
+  working; the AI is never replaced by the mock.
+- **The app itself** sends the same security headers as the VM's Caddy (CSP, `X-Frame-Options: DENY`,
+  `nosniff`, `Referrer-Policy`), turns off `/docs` and `/openapi.json`, allows no other web origin
+  (CORS), refuses request bodies over 64 KB, and behind the tunnel refuses requests without the
+  visitor address (`CF-Connecting-IP`).
 
 The page holds no secrets. Text from requests, tokens or the AI is always shown as plain text.
+
+### Security suite
+
+A security audit (2026-11-06) found 18 issues; none gave a visitor a signature. They are fixed, except
+the three under Honest limits. `scripts/security_suite.py` re-runs every attack from that audit and
+the red team against a running instance, and prints one row per attack: PASS (the attack fails),
+FAIL, KNOWN (an accepted limit below) or SKIP. Exit code 1 on any FAIL. It starts nothing, attacks
+only `127.0.0.1`, keeps the load small, and never prints the admin token or the model key.
+
+```sh
+.\deploy\planb.ps1 security                             # Plan B, on the laptop (Windows)
+backend/.venv/bin/python scripts/security_suite.py --proxy caddy   # on the VM
+FC_SECURITY_URL=http://127.0.0.1:8000 pytest -m security          # the same, as a pytest test
+```
+
+Last run (Plan B, laptop, 2026-11-07): 17 PASS, 0 FAIL, 3 KNOWN (F7, F13, F14), red team 7/7 contained.
+Parallel withdrawals now decide like the same withdrawals one by one (a lock per wallet and per
+destination around the rules, never around the sandbox), and a check that cannot be written to the
+history is blocked before any approval.
 
 ## Honest limits
 
@@ -278,6 +309,9 @@ The page holds no secrets. Text from requests, tokens or the AI is always shown 
 - On the VM, sandboxes run on the API user's rootless Docker (so Docker access is not root). If the red team is not 7/7 there, the allowed fallback is the normal Docker daemon with the API user in the `docker` group, which is root-equivalent; if the demo runs that way, this line will say so. Plan B (a laptop with a tunnel) uses Docker Desktop.
 - Public demo limits and the daily budget live in one API process. Up to 3 model calls already running may finish after the budget is reached.
 - The Guard key file permission check runs on Linux and macOS, not on Windows.
+- One load simulation runs at a time, for all visitors together. A second visitor gets "a load demo is already running" and tries again a minute later.
+- Replay responses include real Guard approvals, signed with the Guard's own key. They cover only the fixed demo requests, expire after 120 s, and no endpoint accepts approvals from outside.
+- Input parsing is lenient in places: amounts may use non-ASCII digits (read as numbers), chain ids have no upper bound, and unknown extra fields are ignored. The approval covers the parsed values, so it matches what the Guard checked; a different parser downstream could read the raw request differently.
 
 ## Run it locally
 

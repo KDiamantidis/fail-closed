@@ -14,7 +14,7 @@
 | App URL | the VM: `https://<ip>.sslip.io` · Plan B: the `https://….trycloudflare.com` address (changes on every restart) | after deploy |
 | Technologies | `lablab.md`, "Technologies" | ready |
 | Tags | `lablab.md`, "Tags" | ready |
-| Release tag | `v1.2-hackathon` | ready |
+| Release tag | `v1.3-hackathon` | ready |
 
 Also switch the README to the version you use:
 - **VM worked:** keep the README as it is (the "vm" text) and add the live link.

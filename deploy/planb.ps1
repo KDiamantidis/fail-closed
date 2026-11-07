@@ -9,6 +9,8 @@
   .\deploy\planb.ps1 stop           # stop the API and remove every Plan B sandbox container
   .\deploy\planb.ps1 start -Rehearsal   # local test without ADMIN_TOKEN (admin actions disabled)
   .\deploy\planb.ps1 redteam      # run the containment check once, so the Containment page shows it
+  .\deploy\planb.ps1 security     # attack the running API with every audit attack (F1-F18) + red team
+  .\deploy\planb.ps1 security -Quick   # the same without the red team, simulations and parallel withdrawals
 
   Same settings as the VM: PUBLIC_DEMO=true, the same per-IP limits, a $1/day AI budget, the AI on
   Vultr Serverless Inference (LLM_MODE=live: no key = AI off, never the mock), warm sandbox pool.
@@ -18,8 +20,9 @@
   never prints them.
 #>
 param(
-  [Parameter(Position = 0, Mandatory = $true)][ValidateSet("start", "stop", "status", "redteam")][string]$Command,
+  [Parameter(Position = 0, Mandatory = $true)][ValidateSet("start", "stop", "status", "redteam", "security")][string]$Command,
   [switch]$Rehearsal,
+  [switch]$Quick,
   [int]$Port = 8000,
   [double]$MinFreeGB = 2.0
 )
@@ -190,9 +193,23 @@ function Redteam-PlanB {
   } else { Write-Host "no report was saved; see $Run\api.err.log" -ForegroundColor Yellow }
 }
 
+function Security-PlanB {
+  if (-not (Api-Pid)) { Fail "the API is not running. Start it first: .\deploy\planb.ps1 start" }
+  # the suite reads ADMIN_TOKEN from .env itself and never prints it; it attacks 127.0.0.1 only
+  $suite = Join-Path $Repo "scripts\security_suite.py"
+  $args2 = @($suite, "--url", $Url, "--proxy", "cloudflared")
+  if ($Quick) { $args2 += "--quick" }
+  & $Python @args2
+  $code = $LASTEXITCODE
+  if ($code -eq 0) { Write-Host "security suite: no FAIL" -ForegroundColor Green }
+  else { Write-Host "security suite: FAIL found (exit code $code)" -ForegroundColor Red }
+  exit $code
+}
+
 switch ($Command) {
   "start" { Start-PlanB }
   "stop" { Stop-PlanB }
   "status" { Status-PlanB }
   "redteam" { Redteam-PlanB }
+  "security" { Security-PlanB }
 }

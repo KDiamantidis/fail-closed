@@ -422,3 +422,30 @@ def test_a_blocked_stream_falls_back_to_polling(server, browser):
     assert_level(page, 2, "High")
     assert "/stream" in calls and "/events" in calls  # tried the stream, then polled
     page.close()
+
+
+@pytest.mark.parametrize("viewport", ["desktop", "phone"])
+def test_public_demo_ui_works_under_the_csp(poll_server, browser, viewport):
+    """F8 (security audit): in public mode the app sends the Caddyfile's security headers. Every
+    page, a replay with its AI card, the review queue and Reset demo work with no CSP violation."""
+    page = browser.new_page(viewport=VIEWPORTS[viewport])
+    errors: list[str] = []
+    page.on("console", lambda m: errors.append(f"console.{m.type}: {m.text}") if m.type == "error" else None)
+    page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+    page.add_init_script("document.addEventListener('securitypolicyviolation', e => "
+                         "console.error('CSP violation: ' + e.violatedDirective + ' ' + e.blockedURI))")
+    resp = page.goto(poll_server + "/#/overview")
+    assert "frame-ancestors 'none'" in resp.headers["content-security-policy"]
+    assert resp.headers["x-frame-options"] == "DENY"
+    page.wait_for_selector('[data-testid="replay-f_honest_large_withdrawal"]:not([disabled])')
+    replay(page, "f_honest_large_withdrawal")
+    open_first_request(page)
+    wait_for_explanation(page)
+    for route in ("/requests", "/review", "/breaker", "/containment", "/simulation", "/policies", "/overview"):
+        go(page, route)
+        page.wait_for_timeout(300)
+        no_hscroll(page)
+    page.click('[data-testid="reset-demo"]')
+    assert_level(page, 0, "Normal")
+    assert errors == [], errors
+    page.close()

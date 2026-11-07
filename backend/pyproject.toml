@@ -34,4 +34,5 @@ pythonpath = ["."]
 markers = [
     "docker: needs a running Docker daemon and the sandbox image (skipped otherwise)",
     "ui: browser test of the built web UI (needs frontend/dist and playwright's chromium)",
+    "security: the security suite against a running instance (needs FC_SECURITY_URL)",
 ]

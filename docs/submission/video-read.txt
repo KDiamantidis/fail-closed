@@ -25,7 +25,7 @@ A plain payout to a known customer passes the rules in milliseconds.
 Anything unusual runs first in an isolated sandbox, with no network and no secrets.
 The rule engine decides: allow, delay, needs review, or block.
 Only an allow gets a signed approval, and the signer signs only with that approval.
-The AI, glm-5.3 [G-L-M five point three], explains and may ask for a closer look.
+The AI runs on Vultr [vulture]. It explains, and it may ask for a closer look.
 [READ IF THE VM WORKED] The Guard and the sandboxes run on a Vultr [vulture] Cloud Compute VM. The AI runs on Vultr Serverless Inference.
 [READ IF PLAN B] Our Vultr [vulture] VM was blocked by account review, so today the Guard runs on my laptop. The AI still runs on Vultr Serverless Inference.
 
@@ -35,7 +35,7 @@ A compromised service asks the hot wallet to sign five delegation authorizations
 Blocked.
 The wallet would hand control to an unknown contract.
 Nothing was signed.
-In the sandbox, a test call moves 100 ETH [eeth] out.
+In the sandbox, a test call moves 100 ETH [E-T-H] out.
 Fake funds, of course.
 The AI explains in plain words.
 It did not decide.

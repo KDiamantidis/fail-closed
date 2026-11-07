@@ -1,4 +1,4 @@
-# Video script (target about 4:15)
+# Video script (target about 4:20)
 
 Read slowly. One sentence at a time. **[CLICK]** = what to do on screen. Words in [brackets]
 are how to say a hard word; do not read them. Times are speaking time at 110 words per minute;
@@ -48,7 +48,7 @@ Spoken lines only, for reading: `docs/submission/video-read.txt`.
 > Anything unusual runs first in an isolated sandbox, with no network and no secrets.
 > The rule engine decides: allow, delay, needs review, or block.
 > Only an allow gets a signed approval, and the signer signs only with that approval.
-> The AI, glm-5.3 [G-L-M five point three], explains and may ask for a closer look.
+> The AI runs on Vultr [vulture]. It explains, and it may ask for a closer look.
 
 **Read ONE of these two lines:**
 
@@ -72,7 +72,7 @@ Spoken lines only, for reading: `docs/submission/video-read.txt`.
 
 **[CLICK]** Scroll to the card **Evidence from the sandbox**.
 
-> In the sandbox, a test call moves 100 ETH [eeth] out.
+> In the sandbox, a test call moves 100 ETH [E-T-H] out.
 > Fake funds, of course.
 
 **[CLICK]** Scroll to the card **AI analysis**. WAIT until it shows text instead of "Analysis in progress" (by polling this can take 5-15 seconds; the header says "Updates every 2 s").
@@ -153,4 +153,4 @@ Spoken lines only, for reading: `docs/submission/video-read.txt`.
 
 ---
 
-Spoken words: 468 (counting the longer where-it-runs line). At 110 words per minute: 4:15 of speaking.
+Spoken words: 472 (counting the longer where-it-runs line). At 110 words per minute: 4:17 of speaking.

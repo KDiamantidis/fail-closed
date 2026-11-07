@@ -36,7 +36,7 @@ or does not answer in time, the request goes to the sandbox. Everything else goe
 first: a new destination, an EIP-7702 delegation, a contract call, or anything a rule flags (for
 example more than 25% of the balance). The sandbox is a local copy of the chain (Docker and
 Anvil): no network, read-only, 512 MB, 1 CPU, no secrets. The rules read what really changes and
-decide: allow, delay, needs review or block. Any error or timeout means block. A frozen address or
+decide: allow, delay, needs review or block. Any sandbox error or timeout means block. A frozen address or
 a paused wallet is blocked at once. A scoped circuit breaker stops as little as possible: one
 address, wallet or chain; everything only with two independent signals. The AI explains each
 decision. It never decides.

@@ -93,6 +93,9 @@ def test_f4_the_same_step_is_explained_once():
     assert first.explanation == again.explanation and len(calls) == 1 and e.cache_hits == 1
     e.explain(req(value=2), None)  # another request: a new call
     assert len(calls) == 2
+    e.assess_or_raise(req(), None)  # the fast AI check of the same step: also paid once
+    e.assess_or_raise(req(), None)
+    assert calls.count(e.settings.vultr_model) == 1
 
 
 def test_f4_one_visitor_cannot_use_the_whole_budget():

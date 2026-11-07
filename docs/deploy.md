@@ -2,7 +2,7 @@
 
 Target: **Ubuntu 24.04, 2 vCPU / 4 GB, Stockholm**, SSH key login, user `root` at first.
 Domain: **`<ip>.sslip.io`** (resolves to the VM, free, real certificate; no certificate email).
-Release: git tag **`v1.2-hackathon`** (`v1.0-hackathon` and `v1.1-hackathon` are earlier ones, kept).
+Release: git tag **`v1.3-hackathon`** (`v1.0`, `v1.1` and `v1.2-hackathon` are earlier ones, kept).
 
 Everything runs from this laptop with `deploy/deploy.sh` over SSH (key `~/.ssh/id_ed25519`).
 The scripts in `deploy/remote/` run on the VM. **Secrets never pass through the scripts or
@@ -40,7 +40,7 @@ Internet ──443/80──► Caddy (Docker Compose, system Docker, host networ
 |---|---|---|
 | 1 | you | Tell Claude the VM's IPv4 address. |
 | 2 | Claude | `deploy/deploy.sh <IP> bootstrap`: user `ops` with your key, firewall, swap, Docker; then root and password login off (checked: `ops` works first, root is refused after). |
-| 3 | Claude | `deploy/deploy.sh <IP> install`: user `failclosed`, rootless Docker, code at `v1.2-hackathon`, sandbox image, web UI, `.env` with both secrets **empty**, systemd unit, Caddy files. About 10 minutes. |
+| 3 | Claude | `deploy/deploy.sh <IP> install`: user `failclosed`, rootless Docker, code at `v1.3-hackathon`, sandbox image, web UI, `.env` with both secrets **empty**, systemd unit, Caddy files. About 10 minutes. |
 | 4 | Claude | `deploy/deploy.sh <IP> secrets`: prints the exact command for you. |
 | 5 | **you** | In **your own terminal** (not the Claude Code prompt, not with `!`, so nothing reaches the chat): `ssh -t ops@<IP> "sudo -u failclosed nano /opt/fail-closed/app/.env"`. Fill in `VULTR_INFERENCE_API_KEY=` and `ADMIN_TOKEN=` (make one with `ssh ops@<IP> "openssl rand -hex 32"`). Save: Ctrl+O, Enter, Ctrl+X. Keep the token safe. Tell Claude "secrets done". |
 | 6 | Claude | `deploy/deploy.sh <IP> finish`: checks both lines are filled (prints only "set" / "MISSING"), starts the API and Caddy, waits for the certificate. |
@@ -98,8 +98,13 @@ Admin only (`ADMIN_TOKEN`, header `X-Admin-Token`):
 - raw `/check` and `/withdraw` on the Guard's own state;
 - lifting a real breaker level (`/breaker/reset`, `/breaker/reset-all`, and the "Lift global
   stop" button, which stays in the UI as the real action);
-- the Guard's own held requests (`/pending/...`);
+- the Guard's own history, held requests, breaker and events (`/history`, `/pending`, `/breaker`,
+  `/events?run_id=main`);
 - a live red-team run.
+
+A visitor sees and acts only on their own runs: `/events` and `/stream` need the visitor's own
+`run_id`, and another visitor's run answers 404, like an unknown one. After 10 wrong admin tokens
+from one visitor, every admin request from that visitor gets 429 for 10 minutes.
 
 Policies cannot be changed through the API at all: they are read-only (`GET /policies`).
 
@@ -107,19 +112,42 @@ Built in:
 
 | Protection | Value |
 |---|---|
-| Replays per IP | 10 per minute |
-| Simulations per IP | 2 per 10 minutes (and one at a time overall) |
-| Demo actions per IP (review decisions, Reset demo) | 30 per minute |
+| A visitor | one IPv4 address, or one IPv6 /64 (`::ffff:a.b.c.d` counts as `a.b.c.d`) |
+| Replays per visitor | 10 per minute; 60 per minute for all visitors together |
+| Simulations per visitor | 2 per 10 minutes; 6 per 10 minutes for all together (and one at a time overall) |
+| Demo actions per visitor (review decisions, Reset demo) | 30 per minute |
+| Any request per visitor | 600 per minute |
+| Live-update connections (`/stream`) per visitor | 3 open at once |
+| `/events` reply | at most 500 events (the page continues from the last one) |
+| Stored demo runs per visitor | 5; a visitor who runs more loses their own oldest run |
 | When a limit is hit | 429 with a plain message, e.g. "Too many replays from your address: at most 10 per minute. Please try again in 42 s." |
 | Idle auto-reset | a visitor's replays are dropped after 10 minutes without activity; the page resets to level 0 too |
 | Daily model budget | $1/day (UTC), kept across restarts; then "Demo budget reached: AI explanations paused until tomorrow"; decisions keep working (the AI check counts as unavailable, so a full simulation runs); never the mock |
+| AI per visitor | at most $0.10 of the daily budget; the same replay step reuses the earlier AI answer (paid once) |
 | Model calls at once | 3, of which explanations use at most 2 |
-| Request size | 64 KB (Caddy) |
+| Request size | 64 KB (the app itself, and Caddy on the VM); chunked bodies are refused |
+| Security headers | sent by the app itself (same as the Caddyfile): CSP, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy: no-referrer` |
+| API docs, CORS | `/docs`, `/redoc`, `/openapi.json` off; no other web origin allowed |
 
 Each replay runs on its own isolated state, so one visitor cannot push the breaker up for
 anyone else; the only shared state is the Guard's own, and in public mode only the admin can
-change it. The client IP for the limits is the last `X-Forwarded-For` entry, trusted only from
-127.0.0.1 (Caddy or the tunnel on the same host).
+change it. The client IP for the limits is the last `X-Forwarded-For` entry on the VM (Caddy), or
+`CF-Connecting-IP` on Plan B (cloudflared), trusted only from 127.0.0.1. On Plan B a request through
+the tunnel without `CF-Connecting-IP` is refused (400).
+
+### Security suite
+
+`scripts/security_suite.py` re-runs every attack of the security audit (F1 to F18) and the red team
+against the running API, and prints ID / attack / result / evidence. PASS = the attack fails,
+FAIL = it works (exit code 1), KNOWN = an accepted limit (README "Honest limits"), SKIP = could
+not run here (the reason is printed). It starts nothing and attacks only 127.0.0.1. Load: a few
+hundred small requests, about 12 replays, 2 simulations, 10 withdrawals, the red team; heavy steps
+are skipped below 1.5 GB free RAM. About 1-2 minutes. It reads `ADMIN_TOKEN` from `.env` for the
+admin checks and never prints it.
+
+- Plan B: `.\deploy\planb.ps1 security` (or `security -Quick`: no red team, simulations or parallel withdrawals).
+- VM: `ssh ops@<IP> "sudo -u failclosed sh -c 'cd /opt/fail-closed/app && backend/.venv/bin/python scripts/security_suite.py --proxy caddy'"`.
+- As a pytest test: `FC_SECURITY_URL=http://127.0.0.1:8000 pytest -m security` (skipped without the variable).
 
 ## Plan B: no VM by Saturday 10:00 (laptop + Cloudflare quick tunnel)
 
@@ -165,6 +193,7 @@ earlier rehearsal went down to 1.14 GB).
    Open that address once and run replay (d) to warm it up.
    Then `.\deploy\planb.ps1 redteam` (1–2 minutes): it runs the containment check once with the
    admin token from `.env` (never printed), so the Containment page shows "All 7 checks contained".
+   Then `.\deploy\planb.ps1 security` (1–2 minutes): every audit attack again; it must end with "0 FAIL".
 4. **Install cloudflared** (once): `winget install --id Cloudflare.cloudflared`, then open a new
    terminal and check `cloudflared --version`. (Or the `.msi` from
    github.com/cloudflare/cloudflared/releases.)
