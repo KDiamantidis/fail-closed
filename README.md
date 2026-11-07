@@ -357,13 +357,14 @@ The API (`backend/app/api.py`): `POST /check` (dry run, never an approval), `POS
 
 | Suite | Count | Where |
 |---|---|---|
-| Unit and API tests, Python 3.12 | 575 passed, 28 skipped (the Docker ones) | `python:3.12-slim` container, 2026-11-06 |
-| Real sandbox + browser tests | 28 passed, 0 containers left | laptop, Docker Desktop, Chromium (Playwright), 2026-11-06 |
+| Unit and API tests, Python 3.12 | 600 passed, 31 skipped (the Docker, browser and live security ones) | `python:3.12-slim` container, 2026-11-08 |
+| Real sandbox + browser tests | 30 passed, 0 test containers left | laptop, Docker Desktop, Chromium (Playwright), 2026-11-07 |
+| Security suite (`scripts/security_suite.py`) | 17 PASS, 0 FAIL, 3 KNOWN, red team 7/7 | Plan B on the laptop, 2026-11-07 |
 
 ```sh
 # Python 3.12, no Docker needed inside
 docker run --rm -v "$PWD:/src:ro" python:3.12-slim sh -c \
-  "mkdir /w && cd /src && tar --exclude=./backend/.venv -cf - backend scenarios | tar -xf - -C /w \
+  "mkdir /w && cd /src && tar --exclude=./backend/.venv --exclude=./frontend/node_modules -cf - backend scenarios scripts frontend | tar -xf - -C /w \
    && cd /w/backend && pip install -q -e '.[dev]' && pytest -q"
 
 # real sandboxes and the browser (Docker, the built UI, python -m playwright install chromium)
