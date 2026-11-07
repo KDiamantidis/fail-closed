@@ -66,7 +66,7 @@ Guard or its key, the protection is gone. [LIMITS: choose one line below.]
 
 **What's next.** Plug into one real signer hook; check every signature against an approved
 withdrawal in the exchange ledger; deny unknown operation types (for example EIP-7702 delegation)
-on withdrawal wallets; rules for deposit-address sweeps.
+on withdrawal wallets; rules for deposit-address sweeps. Agent-written checks: the AI writes a short read-only script that runs in the sandbox and proves its explanation with real output (Challenge 1, Pattern A). Evidence only; the rules still decide.
 
 ### Where it runs: pick ONE
 

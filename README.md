@@ -173,6 +173,7 @@ mentioned, it is not publicly documented in the sources we read; we make no clai
 | Fails closed on every error, timeout or empty result | Deny unknown operation types on withdrawal wallets (for example EIP-7702 delegation) |
 | Scoped circuit breaker (address, wallet, chain, global), every reset logged | Rules for deposit-address sweeps |
 | A Guard approval bound to the request hash; the signer checks it | A pre-approved path to revoke a bad EIP-7702 delegation that the breaker never blocks |
+| | Agent-written checks: the AI writes a short read-only script that runs in the sandbox and proves its explanation with real output (Challenge 1, Pattern A). Evidence only; the rules still decide. |
 
 ## Vultr services used
 
