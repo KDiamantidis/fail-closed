@@ -21,7 +21,7 @@ from collections import Counter, OrderedDict
 from contextlib import contextmanager
 from fractions import Fraction
 from pathlib import Path
-from typing import Any
+from typing import Callable, Any
 
 from pydantic import ValidationError
 
@@ -514,9 +514,21 @@ class LLMExplainer:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": describe(tx, sim)},
         ]
+        model = model or self.settings.vultr_model
+        return self.chat(messages, lambda text: parse_assessment(text).model_copy(update={"model": model}),
+                         model=model, timeout=timeout, retries=retries)
+
+    def chat(self, messages: list[dict[str, str]], parse: Callable[[str], Any], model: str | None = None,
+             timeout: float | None = None, retries: int | None = None, max_tokens: int | None = None) -> Any:
+        """One live model call with the shared rules: the daily budget and the visitor's share
+        (checked before every attempt, never the mock instead), usage and cost counted, and the
+        parsed answer cached by model + messages (the same prompt is paid for once). `parse`
+        turns the text into the result; if it raises, that attempt failed (nothing is cached)."""
+        if self.mode != "live":
+            raise LLMUnavailable("not configured")
         s = self.settings
         model = model or s.vultr_model
-        key = hashlib.sha256((model + "|" + messages[1]["content"]).encode()).hexdigest()
+        key = hashlib.sha256(json.dumps([model, messages], sort_keys=True).encode()).hexdigest()
         paused = self.budget.reached() or self.budget.share_reached(current_visitor.get())
         with self._explained_lock:  # (when paused, the loop below raises: the same answer as always)
             hit = None if paused else self._explained.get(key)
@@ -525,7 +537,7 @@ class LLMExplainer:
                 self.cache_hits += 1
                 return hit
         kwargs: dict[str, Any] = {"model": model, "messages": messages, "temperature": 0,
-                                  "max_tokens": s.llm_max_tokens}
+                                  "max_tokens": max_tokens or s.llm_max_tokens}
         if timeout is not None:
             kwargs["timeout"] = timeout
         if s.llm_json_mode:
@@ -545,7 +557,7 @@ class LLMExplainer:
                 resp = self.client.chat.completions.create(**kwargs)
                 self.usage.add(model, getattr(resp, "usage", None))
                 self.budget.add(call_cost(model, getattr(resp, "usage", None)), current_visitor.get())
-                out = parse_assessment(resp.choices[0].message.content).model_copy(update={"model": model})
+                out = parse(resp.choices[0].message.content)
                 self.usage.attempt(None, model)
                 with self._explained_lock:
                     self._explained[key] = out
