@@ -27,8 +27,7 @@ The Guard plans each check, runs it in the sandbox, and verifies the real output
 The rule engine decides: allow, delay, needs review, or block.
 Only an allow gets a signed approval, and the signer signs only with that approval.
 The AI runs on Vultr [vulture]. It explains, and it may ask for a closer look.
-[READ IF THE VM WORKED] The Guard and the sandboxes run on a Vultr [vulture] Cloud Compute VM. The AI runs on Vultr Serverless Inference.
-[READ IF PLAN B] Our Vultr [vulture] VM was blocked by account review, so today the Guard runs on my laptop. The AI still runs on Vultr Serverless Inference.
+The Guard and the sandboxes run on a Vultr [vulture] Cloud Compute VM. The AI runs on Vultr Serverless Inference.
 
 2:00
 

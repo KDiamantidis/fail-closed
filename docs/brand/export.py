@@ -3,9 +3,9 @@
     backend/.venv/Scripts/python docs/brand/export.py      # Windows
     backend/.venv/bin/python docs/brand/export.py          # Linux / macOS
 
-Writes docs/brand/cover-1920x1080.png, cover-1280x720.png, architecture.png and
-architecture-laptop.png (3200x1800, 2x; the laptop variant for Plan B),
-and preview-*-400.png (how they look at 400 px wide, e.g. a gallery thumbnail; not committed).
+Writes docs/brand/cover-1920x1080.png, cover-1280x720.png and architecture.png
+(3200x1800, 2x), and preview-*-400.png (how they look at 400 px wide, e.g. a gallery
+thumbnail; not committed).
 Needs: pip install playwright && python -m playwright install chromium.
 """
 
@@ -51,9 +51,8 @@ def main() -> None:
             shoot(b, HERE / "cover.html", HERE / "cover-1920x1080.png", 1920, 1080, 1)
             shoot(b, HERE / "cover.html", HERE / "cover-1280x720.png", 1920, 1080, 2 / 3)
         shoot(b, HERE / "architecture.svg", HERE / "architecture.png", 1600, 900, 2)
-        shoot(b, HERE / "architecture-laptop.svg", HERE / "architecture-laptop.png", 1600, 900, 2)
-        for name in (("architecture", "architecture-laptop") if only_diagrams
-                     else ("cover-1280x720", "architecture", "architecture-laptop")):
+        for name in (("architecture",) if only_diagrams
+                     else ("cover-1280x720", "architecture")):
             preview(b, HERE / f"{name}.png", HERE / f"preview-{name}-400.png")
         b.close()
 

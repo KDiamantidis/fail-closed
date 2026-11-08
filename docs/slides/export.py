@@ -1,11 +1,10 @@
-"""Export the slide deck to PDF (16:9, 1920x1080 per page) in two versions, plus a PNG per slide.
+"""Export the slide deck to PDF (16:9, 1920x1080 per page), plus a PNG per slide.
 
     backend/.venv/Scripts/python docs/slides/export.py      # Windows
     backend/.venv/bin/python docs/slides/export.py          # Linux / macOS
 
-Writes docs/slides/fail-closed-vm.pdf (the demo on the Vultr VM) and fail-closed-laptop.pdf
-(Plan B: the demo on a laptop, the AI still on Vultr), and docs/slides/check/<target>-NN.png
-(not committed).
+Writes docs/slides/fail-closed-vm.pdf (the demo on the Vultr VM) and
+docs/slides/check/<target>-NN.png (not committed).
 """
 
 from pathlib import Path
@@ -20,7 +19,7 @@ def main() -> None:
     check.mkdir(exist_ok=True)
     with sync_playwright() as p:
         b = p.chromium.launch()
-        for target in ("vm", "laptop"):
+        for target in ("vm",):
             page = b.new_page(viewport={"width": 1920, "height": 1080})
             page.goto((HERE / "slides.html").as_uri() + f"?target={target}")
             page.evaluate("document.fonts.ready")

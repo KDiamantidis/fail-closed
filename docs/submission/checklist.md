@@ -6,20 +6,17 @@
 |---|---|---|
 | Project title | Fail Closed | ready |
 | Short description | `docs/submission/lablab.md`, "Short description" (115 characters) | ready |
-| Long description | `docs/submission/lablab.md`, "Long description": pick the VM or the Plan B lines | pick one version |
+| Long description | `docs/submission/lablab.md`, "Long description" | ready |
 | Cover image | `docs/brand/cover-1920x1080.png` (also `cover-1280x720.png`) | ready |
 | Video | record with `video-script.md` and `shot-list.md`, under 5 minutes; upload (e.g. YouTube, unlisted) and paste the link | to do |
-| Slides PDF | `docs/slides/fail-closed-vm.pdf`, or `docs/slides/fail-closed-laptop.pdf` for Plan B | pick one |
+| Slides PDF | `docs/slides/fail-closed-vm.pdf` | ready |
 | GitHub URL | https://github.com/KDiamantidis/fail-closed | ready (public) |
-| App URL | the VM: `https://<ip>.sslip.io` · Plan B: the `https://….trycloudflare.com` address (changes on every restart) | after deploy |
+| App URL | `https://70.34.205.46.sslip.io` | live |
 | Technologies | `lablab.md`, "Technologies" | ready |
 | Tags | `lablab.md`, "Tags" | ready |
 | Release tag | `v1.3-hackathon` | ready |
 
-Also switch the README to the version you use:
-- **VM worked:** keep the README as it is (the "vm" text) and add the live link.
-- **Plan B:** in README "Live demo", use the Plan B sentence from `lablab.md`
-  ("The Vultr VM was blocked by account review …") and the tunnel address.
+The README is on the VM version, with the live link `https://70.34.205.46.sslip.io`.
 
 ## Final checks
 
@@ -37,9 +34,9 @@ Re-run the secret and author checks right before submitting if you commit anythi
 
 ## On the day
 
-- [ ] VM or Plan B decided by 10:00
+- [x] Live demo on the Vultr VM: https://70.34.205.46.sslip.io
 - [ ] `ADMIN_TOKEN` set by you (never shared)
-- [ ] Containment report saved (Plan B: `.\deploy\planb.ps1 redteam`; VM: `deploy.sh <IP> verify`)
+- [ ] Containment report saved (VM: `deploy.sh <IP> verify`)
 - [ ] Phone test on mobile data, incl. 11 replays → "Too many replays"
 - [ ] Reset demo before recording
 - [ ] Video recorded and uploaded

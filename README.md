@@ -9,10 +9,9 @@ AI (Vultr Serverless Inference) explains the decision in plain words; it never d
 signer signs only with a Guard approval for that exact request: **no approval, no signature.**
 
 Built for the **Vultr Agent Rush** hackathon on lablab.ai, **Challenge 1: Blast Radius Zero**
-(3–8 November 2026). Slides: [`docs/slides/fail-closed-vm.pdf`](docs/slides/fail-closed-vm.pdf)
-(a laptop version for Plan B: [`fail-closed-laptop.pdf`](docs/slides/fail-closed-laptop.pdf)).
+(3–8 November 2026). Slides: [`docs/slides/fail-closed-vm.pdf`](docs/slides/fail-closed-vm.pdf).
 
-**Live demo:** coming soon (the Vultr VM is not deployed yet).
+**Live demo:** https://70.34.205.46.sslip.io
 
 ## Try it in 60 seconds
 
@@ -57,10 +56,8 @@ The website uses only the neutral attack-class names. The real names stay in thi
 
 ![Architecture](docs/brand/architecture.png)
 
-Target deployment on Vultr Cloud Compute (scripts ready in `deploy/`). The Vultr VM was blocked by
-account review, so the live demo runs on the laptop: see the laptop diagram.
-
-<img src="docs/brand/architecture-laptop.png" alt="Architecture on the demo laptop" width="640">
+Deployed on Vultr Cloud Compute (one VM); setup scripts in `deploy/`, steps in `docs/deploy.md`.
+Live demo: https://70.34.205.46.sslip.io
 
 1. **Judge the effect, not the source.** A request from an "internal" service gets the same checks as any other.
 2. **Run unusual requests for real.** A fresh, locked sandbox (local chain, no internet, no
@@ -311,7 +308,7 @@ backend/.venv/bin/python scripts/security_suite.py --proxy caddy   # on the VM
 FC_SECURITY_URL=http://127.0.0.1:8000 pytest -m security          # the same, as a pytest test
 ```
 
-Last run (Plan B, laptop, 2026-11-07): 17 PASS, 0 FAIL, 3 KNOWN (F7, F13, F14), red team 7/7 contained.
+Last run (laptop, 2026-11-07): 17 PASS, 0 FAIL, 3 KNOWN (F7, F13, F14), red team 7/7 contained.
 Parallel withdrawals now decide like the same withdrawals one by one (a lock per wallet and per
 destination around the rules, never around the sandbox), and a check that cannot be written to the
 history is blocked before any approval.
@@ -324,7 +321,7 @@ history is blocked before any approval.
 - A hackathon prototype: a local test chain with fake funds, not mainnet. The mock signer signs the request hash to show the flow; it does not produce a broadcastable transaction.
 - EIP-7702 is simulated by its effect (delegation code + nonce bump), because the Guard is asked before a signature exists. A test shows it gives the same diff as a real type-4 transaction for test accounts.
 - The AI output is untrusted too: plain, length-limited text, made after the verdict, never read by the rules. Request data is sent to the model inside one marked block it is told never to obey.
-- All measured numbers come from a laptop, not yet from the Vultr VM.
+- All measured numbers come from a laptop (6–7 Nov 2026).
 - Model latency varies a lot (933 ms median one day, about 4.5 s the next, laptop). A late AI check means a full simulation: safe, but slower.
 - On the VM, sandboxes run on the API user's rootless Docker (so Docker access is not root). If the red team is not 7/7 there, the allowed fallback is the normal Docker daemon with the API user in the `docker` group, which is root-equivalent; if the demo runs that way, this line will say so. Plan B (a laptop with a tunnel) uses Docker Desktop.
 - Public demo limits and the daily budget live in one API process. Up to 3 model calls already running may finish after the budget is reached.
@@ -379,7 +376,7 @@ The API (`backend/app/api.py`): `POST /check` (dry run, never an approval), `POS
 |---|---|---|
 | Unit and API tests, Python 3.12 | 600 passed, 31 skipped (the Docker, browser and live security ones) | `python:3.12-slim` container, 2026-11-08 |
 | Real sandbox + browser tests | 30 passed, 0 test containers left | laptop, Docker Desktop, Chromium (Playwright), 2026-11-07 |
-| Security suite (`scripts/security_suite.py`) | 17 PASS, 0 FAIL, 3 KNOWN, red team 7/7 | Plan B on the laptop, 2026-11-07 |
+| Security suite (`scripts/security_suite.py`) | 17 PASS, 0 FAIL, 3 KNOWN, red team 7/7 | laptop, 2026-11-07 |
 
 ```sh
 # Python 3.12, no Docker needed inside

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>Fail Closed slides</title>
-<!-- 10 slides, 1920x1080 each. Exported to fail-closed.pdf by docs/slides/export.py.
+<!-- 11 slides, 1920x1080 each. Exported to fail-closed-vm.pdf by docs/slides/export.py.
      Same colours and fonts as the web UI and docs/brand.
      Incident facts as checked against public sources; every measured number says where and how
      it was measured. -->
@@ -51,13 +51,7 @@
   .shot .chrome i { width: 11px; height: 11px; border-radius: 50%; background: var(--border-strong); display: block; }
   .shot img { display: block; width: 100%; }
   .logo { width: 72px; height: 72px; }
-  /* where the demo runs: docs/slides/export.py builds fail-closed-vm.pdf and fail-closed-laptop.pdf */
-  html[data-target="vm"] .laptop-only, html[data-target="laptop"] .vm-only { display: none !important; }
 </style>
-<script>
-  document.documentElement.dataset.target =
-    new URLSearchParams(location.search).get("target") === "laptop" ? "laptop" : "vm";
-</script>
 </head>
 <body>
 
@@ -69,8 +63,7 @@
   <h1 style="margin-top:44px;font-size:150px;line-height:1;font-weight:700;color:var(--ink);letter-spacing:-0.04em">Fail Closed</h1>
   <p style="margin-top:30px;font-size:64px;font-weight:600;color:var(--brand);letter-spacing:-0.015em">No approval, no signature.</p>
   <p class="lead" style="margin-top:36px;font-size:38px">An independent co-signer for crypto wallets. Unusual withdrawals run in an isolated sandbox before anything is signed.</p>
-  <p class="vm-only" style="margin-top:56px;font-size:30px;font-weight:500;color:var(--muted)">Built on Vultr Serverless Inference + Cloud Compute</p>
-  <p class="laptop-only" style="margin-top:56px;font-size:30px;font-weight:500;color:var(--muted)">AI on Vultr Serverless Inference · the demo runs on a laptop (the Vultr VM was blocked by account review)</p>
+  <p style="margin-top:56px;font-size:30px;font-weight:500;color:var(--muted)">Built on Vultr Serverless Inference + Cloud Compute</p>
   <div class="foot"><span>Vultr Agent Rush · Challenge 1: Blast Radius Zero · November 2026</span><span>1</span></div>
 </section>
 
@@ -132,9 +125,7 @@
 <!-- 5. How it works -->
 <section class="slide" style="padding-top:64px">
   <p class="kicker">How it works</p>
-  <img class="laptop-only" src="../brand/architecture-laptop.png" alt="Architecture on the demo laptop: Cloudflare tunnel, Guard, fast path or sandbox, rule engine, approval, signer"
-       style="display:block;margin:20px auto 0;width:1560px;border-radius:16px;border:1px solid var(--border)">
-  <img class="vm-only" src="../brand/architecture.png" alt="Architecture: request, Guard, fast path or sandbox, rule engine, approval, signer"
+  <img src="../brand/architecture.png" alt="Architecture: request, Guard, fast path or sandbox, rule engine, approval, signer"
        style="display:block;margin:20px auto 0;width:1560px;border-radius:16px;border:1px solid var(--border)">
   <span class="num">5</span>
 </section>
@@ -234,7 +225,7 @@
     Rows 1–4: <span>backend/cli.py loadtest</span>, mock AI (800 ms per call), file <span>docs/results/loadtest-20261106-111314.md</span>.
     Row 5: real Vultr <span>glm-5.3-flash</span> + <span>glm-5.3</span>, file <span>docs/results/live/loadtest-20261106-111340.md</span>.
     Row 6: <span>backend/cli.py redteam</span>, file <span>docs/results/redteam-20261106.txt</span>.
-    <span class="vm-only">Not yet measured on the Vultr VM.</span><span class="laptop-only">The Vultr VM was blocked by account review, so all numbers are from the laptop.</span></p>
+    </p>
   <span class="num">9</span>
 </section>
 
@@ -262,8 +253,7 @@
         <li>A hackathon prototype: local test chain, fake funds.</li>
         <li>It does not stop the first break-in. It stops the break-in from getting a signature.</li>
         <li>If an attacker takes over the Guard or its key, the protection is gone: run it separately.</li>
-        <li class="vm-only">Numbers so far come from a laptop, not yet from the VM.</li>
-        <li class="laptop-only">The Vultr VM was blocked by account review, so the demo and all numbers are from a laptop.</li>
+        <li>Numbers so far come from a laptop (6&ndash;7 Nov 2026).</li>
       </ul>
     </div>
     <div class="card">

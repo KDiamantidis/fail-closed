@@ -4,10 +4,10 @@ Read slowly. One sentence at a time. **[CLICK]** = what to do on screen. Words i
 are how to say a hard word; do not read them. Times are speaking time at 110 words per minute;
 clicks and waiting add a little.
 
-Before you record: page **Overview** → **Reset demo** (the strip says "Normal"). Plan B: run
-`.\deploy\planb.ps1 redteam` once first, so the Containment page has its report.
+Before you record: page **Overview** → **Reset demo** (the strip says "Normal"). The Containment
+page already has its saved report from `deploy.sh <IP> verify`.
 
-Slides: `docs/slides/fail-closed-vm.pdf`, or `fail-closed-laptop.pdf` for Plan B.
+Slides: `docs/slides/fail-closed-vm.pdf`.
 Spoken lines only, for reading: `docs/submission/video-read.txt`.
 
 ---
@@ -53,9 +53,7 @@ Spoken lines only, for reading: `docs/submission/video-read.txt`.
 
 **Read ONE of these two lines:**
 
-> **If the VM worked:** The Guard and the sandboxes run on a Vultr [vulture] Cloud Compute VM. The AI runs on Vultr Serverless Inference.
->
-> **If Plan B (laptop):** Our Vultr [vulture] VM was blocked by account review, so today the Guard runs on my laptop. The AI still runs on Vultr Serverless Inference.
+> The Guard and the sandboxes run on a Vultr [vulture] Cloud Compute VM. The AI runs on Vultr Serverless Inference.
 
 
 ## 2:00 · Demo 1: delegation drain

@@ -149,12 +149,10 @@ admin checks and never prints it.
 - VM: `ssh ops@<IP> "sudo -u failclosed sh -c 'cd /opt/fail-closed/app && backend/.venv/bin/python scripts/security_suite.py --proxy caddy'"`.
 - As a pytest test: `FC_SECURITY_URL=http://127.0.0.1:8000 pytest -m security` (skipped without the variable).
 
-## Plan B: no VM by Saturday 10:00 (laptop + Cloudflare quick tunnel)
+## Plan B: fallback (laptop + Cloudflare quick tunnel)
 
-For the submission, if we use it:
-
-> The Vultr VM was blocked by account review before the deadline, so the demo runs on the
-> laptop; the AI still runs on Vultr Serverless Inference.
+Kept as a fallback in case the VM is unavailable. The live demo runs on the Vultr VM
+(https://70.34.205.46.sslip.io); this section is the laptop procedure if it is ever needed.
 
 ### What Plan B runs
 

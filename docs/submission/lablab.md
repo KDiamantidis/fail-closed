@@ -68,22 +68,16 @@ Guard or its key, the protection is gone. [LIMITS: choose one line below.]
 withdrawal in the exchange ledger; deny unknown operation types (for example EIP-7702 delegation)
 on withdrawal wallets; rules for deposit-address sweeps. Agent-written checks: the AI writes a short read-only script that runs in the sandbox and proves its explanation with real output (Challenge 1, Pattern A). Evidence only; the rules still decide.
 
-### Where it runs: pick ONE
+### Where it runs
 
-- **[WHERE] if the VM worked:** Vultr Cloud Compute runs the Guard, the sandboxes and the web app on one VM.
-- **[WHERE] if Plan B:** The Vultr VM was blocked by account review before the deadline, so the demo runs on the laptop; the AI still runs on Vultr Serverless Inference.
-- **[LIMITS] if the VM worked:** All measured numbers above come from a laptop; the VM runs the live demo.
-- **[LIMITS] if Plan B:** The Vultr VM was blocked by account review, so the demo and all numbers are from a laptop.
+- **Where:** Vultr Cloud Compute runs the Guard, the sandboxes and the web app on one VM. Live demo: https://70.34.205.46.sslip.io
+- **Limits:** All measured numbers above come from a laptop (6–7 Nov 2026); the VM runs the live demo.
 
-## Technologies: pick ONE
+## Technologies
 
-- **If the VM worked:** Python, FastAPI, Pydantic, Docker (rootless), Foundry Anvil (Prague
-  hardfork), EIP-7702, SQLite, ed25519 approvals, React, Vite, Tailwind CSS, Server-Sent Events
-  with polling fallback, Playwright, Caddy, Vultr Serverless Inference (glm-5.3-flash, glm-5.3),
-  Vultr Cloud Compute.
-- **If Plan B:** Python, FastAPI, Pydantic, Docker Desktop, Foundry Anvil (Prague hardfork),
-  EIP-7702, SQLite, ed25519 approvals, React, Vite, Tailwind CSS, Server-Sent Events with polling
-  fallback, Playwright, Cloudflare Tunnel, Vultr Serverless Inference (glm-5.3-flash, glm-5.3).
+- Python, FastAPI, Pydantic, Docker (rootless), Foundry Anvil (Prague hardfork), EIP-7702, SQLite,
+  ed25519 approvals, React, Vite, Tailwind CSS, Server-Sent Events with polling fallback, Playwright,
+  Caddy, Vultr Serverless Inference (glm-5.3-flash, glm-5.3), Vultr Cloud Compute.
 
 ## Tags
 
