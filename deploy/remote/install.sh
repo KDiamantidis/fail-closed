@@ -60,7 +60,7 @@ as_fc "cd $APP && git fetch -q --tags && git -c advice.detachedHead=false checko
 install -d -o "$FC" -g "$FC" -m 700 "$APP/data"
 
 echo "-- sandbox image (in the daemon the API uses)"
-as_fc "cd $APP && sandbox/build.sh"
+as_fc "cd $APP && sh sandbox/build.sh"   # invoke via sh: the file may lack the exec bit (committed from Windows)
 
 echo "-- Python"
 as_fc "cd $APP && python3 -m venv backend/.venv && backend/.venv/bin/pip install -q --upgrade pip && backend/.venv/bin/pip install -q -e backend"

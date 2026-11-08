@@ -40,7 +40,8 @@ as_root() { ssh "${SSH_OPTS[@]}" "root@$IP" "$@"; }
 as_ops() { ssh "${SSH_OPTS[@]}" "$OPS@$IP" "$@"; }
 push() {  # push <user> <files...>: copy the remote scripts to /tmp/fc-deploy
   local user="$1"; shift
-  ssh "${SSH_OPTS[@]}" "$user@$IP" "rm -rf /tmp/fc-deploy && mkdir -p /tmp/fc-deploy"
+  # /tmp is sticky: a dir left by another user (e.g. root's push) can't be rm'd by ops, so fall back to sudo.
+  ssh "${SSH_OPTS[@]}" "$user@$IP" "rm -rf /tmp/fc-deploy 2>/dev/null || sudo rm -rf /tmp/fc-deploy; mkdir -p /tmp/fc-deploy"
   scp -q "${SSH_OPTS[@]}" "$@" "$user@$IP:/tmp/fc-deploy/"
   ssh "${SSH_OPTS[@]}" "$user@$IP" "sed -i 's/\r\$//' /tmp/fc-deploy/*"  # Windows line endings
 }
