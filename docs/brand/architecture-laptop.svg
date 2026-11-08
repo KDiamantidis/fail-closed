@@ -126,22 +126,22 @@
   <text x="460" y="762" class="s">history, holds</text>
 
   <!-- flows -->
-  <path d="M214 456 H268" class="flow" marker-end="url(#a)"/>
-  <path d="M408 456 H432" class="flow" marker-end="url(#a)"/>
-  <path d="M608 430 C628 430 628 339 640 339" class="flow" marker-end="url(#a)"/>
-  <path d="M608 482 C624 482 624 518 632 518" class="flow" marker-end="url(#a)"/>
-  <path d="M910 339 C926 339 920 430 930 430" class="flow" marker-end="url(#a)"/>
-  <path d="M918 518 C926 518 922 480 930 480" class="flow" marker-end="url(#a)"/>
-  <path d="M1114 440 H1142" class="allow" marker-end="url(#g)"/>
+  <path d="M214 456 H276" class="flow" marker-end="url(#a)"/>
+  <path d="M408 456 H440" class="flow" marker-end="url(#a)"/>
+  <path d="M608 430 H628 V339 H648" class="flow" marker-end="url(#a)"/>
+  <path d="M608 482 H628 V518 H648" class="flow" marker-end="url(#a)"/>
+  <path d="M910 339 H928 V430 H938" class="flow" marker-end="url(#a)"/>
+  <path d="M918 518 H928 V498 H938" class="flow" marker-end="url(#a)"/>
+  <path d="M1114 440 H1150" class="allow" marker-end="url(#g)"/>
   <text x="1132" y="390" text-anchor="middle" font-size="13" font-weight="700" fill="#0f766e">ALLOW</text>
-  <path d="M1336 456 H1364" class="allow" marker-end="url(#g)"/>
-  <path d="M1026 528 V554" class="flow" marker-end="url(#a)"/>
-  <path d="M1114 486 C1132 486 1128 630 1142 630" class="red" marker-end="url(#r)"/>
+  <path d="M1336 456 H1372" class="allow" marker-end="url(#g)"/>
+  <path d="M1026 528 V562" class="flow" marker-end="url(#a)"/>
+  <path d="M1114 486 H1132 V630 H1150" class="red" marker-end="url(#r)"/>
   <text x="1150" y="576" font-size="13" font-weight="700" fill="#b42318">BLOCK</text>
-  <path d="M1114 662 H1142" class="red" marker-end="url(#r)"/>
+  <path d="M1114 662 H1150" class="red" marker-end="url(#r)"/>
   <text x="1152" y="704" font-size="14.5" font-weight="600" fill="#b42318">from the breaker: frozen or paused → block</text>
-  <path d="M342 502 V692" class="flow" marker-end="url(#a)" marker-start="url(#a)"/>
-  <path d="M524 516 V692" class="flow" marker-end="url(#a)"/>
+  <path d="M342 502 V700" class="flow" marker-end="url(#a)" marker-start="url(#a)"/>
+  <path d="M524 516 V700" class="flow" marker-end="url(#a)"/>
 
   <path d="M1460 400 V316" class="allow" marker-end="url(#g)"/>
   <text x="1460" y="304" text-anchor="middle" font-size="15" font-weight="700" fill="#0f766e">signed transaction</text>

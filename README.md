@@ -57,6 +57,11 @@ The website uses only the neutral attack-class names. The real names stay in thi
 
 ![Architecture](docs/brand/architecture.png)
 
+Target deployment on Vultr Cloud Compute (scripts ready in `deploy/`). The Vultr VM was blocked by
+account review, so the live demo runs on the laptop: see the laptop diagram.
+
+<img src="docs/brand/architecture-laptop.png" alt="Architecture on the demo laptop" width="640">
+
 1. **Judge the effect, not the source.** A request from an "internal" service gets the same checks as any other.
 2. **Run unusual requests for real.** A fresh, locked sandbox (local chain, no internet, no
    secrets) shows what really changes. Its starting state (balances, nonces, code) comes from the
